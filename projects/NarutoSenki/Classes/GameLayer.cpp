@@ -696,7 +696,7 @@ void GameLayer::updateNetworkBattle(float dt)
 	auto &session = sharedLanSession();
 	session.poll();
 
-	if (session.state() == SessionState::Finished || session.state() == SessionState::Error)
+	if (session.state() == nsv2::network::SessionState::Finished || session.state() == nsv2::network::SessionState::Error)
 	{
 		std::vector<SessionNotice> notices;
 		session.drainNotices(notices);

@@ -47,6 +47,7 @@ bool NetworkLobbyLayer::init()
     if (!Layer::init())
         return false;
 
+    addSprites("UI.plist");
     addSprites("Menu.plist");
     addSprites("Select.plist");
     addSprites("Record.plist");
@@ -503,23 +504,16 @@ void NetworkLobbyLayer::renderHostPage()
         controlMenu->addChild(readyBtn);
 
         // Start Match Button (Host only, when both players are ready)
-        bool bothReady = config.slots.size() >= 2 && config.slots[0].ready && config.slots[1].ready;
-        if (_session->role() == nsv2::network::SessionRole::Host && bothReady)
+        bool clientReady = config.slots.size() >= 2 && config.slots[1].ready;
+        bool hostReady = config.slots.size() >= 1 && config.slots[0].ready;
+        if (_session->role() == nsv2::network::SessionRole::Host && hostReady && clientReady)
         {
             auto startBtn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("start_btn.png"),
                                                    Sprite::createWithSpriteFrameName("start_btn.png"),
                                                    this, menu_selector(NetworkLobbyLayer::onStart));
-            startBtn->setPosition(Vec2(winSize.width / 2, 90));
+            startBtn->setPosition(Vec2(winSize.width / 2, 92));
             controlMenu->addChild(startBtn);
         }
-    }
-    else if (_session->state() == nsv2::network::SessionState::Loading)
-    {
-        auto loadBtn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("start_btn.png"),
-                                              Sprite::createWithSpriteFrameName("start_btn.png"),
-                                              this, menu_selector(NetworkLobbyLayer::onStart));
-        loadBtn->setPosition(Vec2(winSize.width / 2, 50));
-        controlMenu->addChild(loadBtn);
     }
 }
 
@@ -619,7 +613,7 @@ void NetworkLobbyLayer::renderHeroSelectPage()
 
 void NetworkLobbyLayer::enterNetworkBattle()
 {
-    if (_battleEntered || _session->state() != nsv2::network::SessionState::Battle)
+    if (_battleEntered || (_session->state() != nsv2::network::SessionState::Loading && _session->state() != nsv2::network::SessionState::Battle))
         return;
     _battleEntered = true;
 
@@ -655,7 +649,22 @@ void NetworkLobbyLayer::update(float dt)
         _session->setLocalHero(kAllSelectHeroes[1]); // Sasuke for client default
     }
 
-    if (_session->state() == nsv2::network::SessionState::Battle)
+    // Real-time synchronization of lobby state (hero change, ready toggle, opponent join)
+    if (_page == Page::Host && _session->state() == nsv2::network::SessionState::Lobby)
+    {
+        const auto &cfg = _session->matchConfig();
+        std::ostringstream fp;
+        fp << (_session->localReady() ? 1 : 0) << ':';
+        for (const auto &slot : cfg.slots)
+            fp << slot.heroName << ',' << (slot.ready ? 1 : 0) << ',' << slot.playerName << ';';
+        if (fp.str() != _lobbyFingerprint)
+        {
+            _lobbyFingerprint = fp.str();
+            renderPage();
+        }
+    }
+
+    if (_session->state() == nsv2::network::SessionState::Loading || _session->state() == nsv2::network::SessionState::Battle)
     {
         enterNetworkBattle();
         return;

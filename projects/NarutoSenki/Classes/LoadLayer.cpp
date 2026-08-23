@@ -1,5 +1,6 @@
 #include "LoadLayer.h"
 #include "GameMode/GameModeImpl.h"
+#include "Network/LanNetworkRuntime.hpp"
 
 LoadLayer::LoadLayer()
 {
@@ -64,6 +65,12 @@ bool LoadLayer::init()
 
 void LoadLayer::preloadIMG()
 {
+	addSprites("UI.plist");
+	addSprites("Menu.plist");
+	addSprites("NamePlate.plist");
+	addSprites("Record.plist");
+	addSprites("Select.plist");
+
 	auto herosDataVector = getGameModeHandler()->getHerosArray();
 	int count = herosDataVector.size();
 	if (count == 2) // 1v1
@@ -338,6 +345,13 @@ void LoadLayer::preloadAudio()
 
 void LoadLayer::onLoadFinish(float dt)
 {
+	(void)dt;
+	if (_networkBattle)
+	{
+		std::string err;
+		nsv2::network::sharedLanSession().markLoaded(&err);
+	}
+
 	Scene *gameScene = Scene::create();
 
 	_hudLayer = HudLayer::create();

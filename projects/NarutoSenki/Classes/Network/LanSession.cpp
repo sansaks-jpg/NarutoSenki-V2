@@ -305,6 +305,11 @@ bool LanSession::markLoaded(std::string *error)
     }
     else if (_remoteLoaded)
     {
+        Message ready;
+        ready.type = MessageType::Ack;
+        ready.sequence = _nextSequence++;
+        ready.payload.push_back(1);
+        sendToRemote(ready, error);
         setState(SessionState::Battle, "Semua pemain selesai memuat. Match berjalan.");
     }
     return true;

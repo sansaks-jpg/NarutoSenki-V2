@@ -77,4 +77,5 @@ private:
     int _lastClickedHeroIndex = -1;
     float _lastHeroClickTime = 0.0f;
     float _totalRunningTime = 0.0f;
+    std::string _lobbyFingerprint;
 };

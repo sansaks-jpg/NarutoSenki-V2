@@ -808,12 +808,23 @@ void NetworkLobbyLayer::onJoinRoom(Ref *sender)
     const int index = static_cast<MenuItem *>(sender)->getTag();
     if (index < 0 || static_cast<size_t>(index) >= _rooms.size())
         return;
+
+    // 1. Copy target address & port safely before stopping scan
+    const std::string targetAddress = _rooms[static_cast<size_t>(index)].address;
+    const uint16_t targetPort = _rooms[static_cast<size_t>(index)].port != 0 ? _rooms[static_cast<size_t>(index)].port : nsv2::network::kDefaultLanPort;
+
+    if (targetAddress.empty())
+        return;
+
+    _savedIpText = targetAddress + ":" + std::to_string(targetPort);
+    if (_ipEditBox)
+        _ipEditBox->setText(_savedIpText.c_str());
+
     SimpleAudioEngine::sharedEngine()->playEffect("Audio/Menu/confirm.ogg");
     _session->stopScan();
     _page = Page::Host;
     std::string error;
-    const auto &room = _rooms[static_cast<size_t>(index)];
-    if (!_session->join(room.address, room.port, "Client", &error))
+    if (!_session->join(targetAddress, targetPort, "Client", &error))
         setMessage("Failed to join room: " + error);
     renderPage();
 }

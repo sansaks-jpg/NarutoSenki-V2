@@ -108,10 +108,9 @@ function SelectLayer:init()
     menu_bar_t:fullScreen()
     self:addChild(menu_bar_t, 2)
 
-    local select_title = display.newSprite('#hcmode_title.png')
+    local select_title = ns.text.keyLabel('select_character', 0.42)
     select_title:setAnchorPoint(0, 0)
-    select_title:setPosition(2,
-                             height - select_title:getContentSize().height - 2)
+    select_title:setPosition(2, height - 24)
     self:addChild(select_title, 3)
 
     local selectNameList = {}
@@ -196,8 +195,9 @@ function SelectLayer:init()
         heroHalfImage:setAnchorPoint(0, 0)
         self:addChild(heroHalfImage, 1)
 
-        local heroName = display.newSprite('#' .. hero .. '_font.png', 100, 20)
+        local heroName = ns.text.label(ns.text.characterName(hero), 0.34)
         heroName:setAnchorPoint(0.5, 0)
+        heroName:setPosition(100, 20)
         self:addChild(heroName, 5)
 
         self._heroName = heroName
@@ -220,29 +220,19 @@ function SelectLayer:init()
         end
     end
 
-    local ranking_btn = ui.newImageMenuItem({
-        image = '#ranking_btn.png',
-        listener = handler(self, SelectLayer.onRankingButtonClick)
-    })
+    local ranking_btn = ns.text.keyMenuItem('ranking', handler(self, SelectLayer.onRankingButtonClick), 0.30, ns.menu.SELECT_SOUND)
     ranking_btn:setAnchorPoint(1, 0.5)
     local menu3 = ui.newMenu({ranking_btn})
     menu3:setPosition(width - 15, height - 34)
     self:addChild(menu3, 5)
 
-    local start_btn = ui.newImageMenuItem({
-        image = '#start_btn.png',
-        -- call c++ layer function
-        listener = function() self:onGameStart() end
-    })
+    local start_btn = ns.text.keyMenuItem('start', function() self:onGameStart() end, 0.34, ns.menu.SELECT_SOUND)
     local menu = ui.newMenu({start_btn})
     menu:setAnchorPoint(0, 0)
     menu:setPosition(width - 40, 36)
     self:addChild(menu, 5)
 
-    local skill_btn = ui.newImageMenuItem({
-        image = '#skill_btn.png',
-        listener = handler(self, SelectLayer.onSkillMenuButtonClick)
-    })
+    local skill_btn = ns.text.keyMenuItem('skills', handler(self, SelectLayer.onSkillMenuButtonClick), 0.30, ns.menu.SELECT_SOUND)
     local menu2 = ui.newMenu({skill_btn})
     menu2:setAnchorPoint(0, 0)
     menu2:setPosition(width - 35, 96)
@@ -250,10 +240,7 @@ function SelectLayer:init()
 
     -- Desktop return button
     if _G.platform == 'desktop' then
-        local skill_btn = ui.newImageMenuItem({
-            image = '#return_btn.png',
-            listener = backToStartMenu
-        })
+        local skill_btn = ns.text.keyMenuItem('return_to_menu', backToStartMenu, 0.30, 'Audio/Menu/cancel.ogg')
         local menu3 = ui.newMenu({skill_btn})
         menu3:setAnchorPoint(0, 0)
         menu3:setPosition(width - 35, 135)
@@ -298,7 +285,7 @@ function SelectLayer:initCustomSelectMode()
     teamSelector:addChild(comSelector1)
     self._comSelector1 = comSelector1
 
-    self._comLabel1 = display.newSprite('#com_label.png')
+    self._comLabel1 = ns.text.keyLabel('player_1', 0.26)
     self._comLabel1:setPosition(comSelector1:getPositionX() +
                                     comSelector1:getContentSize().width + 2 + 18,
                                 comSelector1:getPositionY() +
@@ -313,7 +300,7 @@ function SelectLayer:initCustomSelectMode()
                              comSelector1:getPositionY())
     teamSelector:addChild(comSelector2)
 
-    self._comLabel2 = display.newSprite('#com_label.png')
+    self._comLabel2 = ns.text.keyLabel('player_2', 0.26)
     self._comLabel2:setPosition(comSelector2:getPositionX() +
                                     comSelector2:getContentSize().width + 2 + 18,
                                 comSelector2:getPositionY() +
@@ -330,7 +317,7 @@ function SelectLayer:initCustomSelectMode()
                                  comSelector2:getPositionY())
         teamSelector:addChild(comSelector3)
 
-        self._comLabel3 = display.newSprite('#com_label.png')
+        self._comLabel3 = ns.text.keyLabel('player_3', 0.26)
         self._comLabel3:setPosition(comSelector3:getPositionX() +
                                         comSelector3:getContentSize().width + 3 +
                                         18, comSelector3:getPositionY() +
@@ -417,8 +404,9 @@ function SelectLayer:setSelected(btn)
         self:addChild(self._heroHalfImage, 1)
 
         self._heroName:removeFromParent()
-        self._heroName = display.newSprite(charName .. '_font.png', 100, 20)
+        self._heroName = ns.text.label(ns.text.characterName(btn._charName), 0.34)
         self._heroName:setAnchorPoint(CCPoint(0.5, 0))
+        self._heroName:setPosition(100, 20)
         self:addChild(self._heroName, 5)
     elseif not self._com1Select then
         self._comSelector1:setDisplayFrame(
@@ -430,8 +418,7 @@ function SelectLayer:setSelected(btn)
 
             self._comLabel1:stopAllActions()
             self._comLabel1:setOpacity(255)
-            self._comLabel1:setDisplayFrame(
-                display.newSpriteFrame('com_label2.png'))
+            self._comLabel1:setString(ns.text.characterName(self._com1Select))
         end
     elseif not self._com2Select then
         self._comSelector2:setDisplayFrame(
@@ -443,8 +430,7 @@ function SelectLayer:setSelected(btn)
 
             self._comLabel2:stopAllActions()
             self._comLabel2:setOpacity(255)
-            self._comLabel2:setDisplayFrame(
-                display.newSpriteFrame('com_label2.png'))
+            self._comLabel2:setString(ns.text.characterName(self._com2Select))
         end
     elseif not self._com3Select then
         self._comSelector3:setDisplayFrame(
@@ -456,8 +442,7 @@ function SelectLayer:setSelected(btn)
 
             self._comLabel3:stopAllActions()
             self._comLabel3:setOpacity(255)
-            self._comLabel3:setDisplayFrame(
-                display.newSpriteFrame('com_label2.png'))
+            self._comLabel3:setString(ns.text.characterName(self._com3Select))
 
             self._selectImg:removeFromParent()
             self._selectImg = nil

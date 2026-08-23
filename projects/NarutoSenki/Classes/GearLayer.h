@@ -22,7 +22,8 @@ public:
 	Layer *currentGear_layer = nullptr;
 	CCLabelBMFont *coinLabel = nullptr;
 
-	Sprite *gearDetail = nullptr;
+	CCLabelBMFont *gearDetail = nullptr;
+	void setGearDetail(GearType gear);
 #if (CC_TARGET_PLATFORM == CC_PLATFORM_LINUX) || (CC_TARGET_PLATFORM == CC_PLATFORM_WIN32) || (CC_TARGET_PLATFORM == CC_PLATFORM_MAC)
 	Sprite *gearBigIcon;
 #endif

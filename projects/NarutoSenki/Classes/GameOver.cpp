@@ -2,6 +2,7 @@
 #include "GameLayer.h"
 #include "Core/Hero.hpp"
 #include "GameMode/GameModeImpl.h"
+#include "Data/Fonts.h"
 
 GameOver::GameOver()
 {
@@ -44,9 +45,10 @@ bool GameOver::init(RenderTexture *snapshoot)
 	FULL_SCREEN_SPRITE(menu_bar_t);
 	addChild(menu_bar_t, 2);
 
-	auto result_title = Sprite::createWithSpriteFrameName("result_title.png");
+	auto result_title = CCLabelBMFont::create("RESULT", Fonts::Default);
 	result_title->setAnchorPoint(Vec2(0, 0));
-	result_title->setPosition(Vec2(2, winSize.height - result_title->getContentSize().height - 2));
+	result_title->setScale(0.45f);
+	result_title->setPosition(Vec2(2, winSize.height - 24));
 	addChild(result_title, 3);
 
 	result_bg = Sprite::createWithSpriteFrameName("gameover_bg.png");
@@ -318,41 +320,42 @@ void GameOver::listResult()
 		addChild(rewardLabel, 7);
 	}
 
-	const char *imgSrc = nullptr;
+	const char *rankText = nullptr;
 	bool isEnableSROrBetter = getGameLayer()->_isHardCoreGame && getGameLayer()->_isRandomChar && !getGameLayer()->_enableGear;
 
 	if (_isWin)
 	{
 		if (resultScore >= 140 && isEnableSROrBetter)
-			imgSrc = "result_SSSR.png";
+				rankText = "SSSR";
 		else if (resultScore >= 120 && isEnableSROrBetter)
-			imgSrc = "result_SSR.png";
+				rankText = "SSR";
 		else if (resultScore >= 100 && isEnableSROrBetter)
-			imgSrc = "result_SR.png";
+				rankText = "SR";
 		else if (resultScore >= 140)
-			imgSrc = "result_SSS.png";
+				rankText = "SSS";
 		else if (resultScore >= 120)
-			imgSrc = "result_SS.png";
+				rankText = "SS";
 		else if (resultScore >= 100)
-			imgSrc = "result_S.png";
+				rankText = "S";
 		else if (resultScore >= 80)
-			imgSrc = "result_A.png";
+				rankText = "A";
 		else if (resultScore >= 60)
-			imgSrc = "result_B.png";
+				rankText = "B";
 		else
-			imgSrc = "result_C.png";
+				rankText = "C";
 	}
 	else if (!_isWin)
 	{
-		imgSrc = "result_Defeat.png";
+			rankText = "DEFEAT";
 	}
 
-	if (imgSrc)
+	if (rankText)
 	{
-		auto recordSprite = Sprite::createWithSpriteFrameName(imgSrc);
-		recordSprite->setAnchorPoint(Vec2(0, 0));
-		recordSprite->setPosition(Vec2(winSize.width / 2 + result_bg->getContentSize().width / 2 - recordSprite->getContentSize().width - 12, result_bg->getPositionY() - result_bg->getContentSize().height / 2 + 88));
-		addChild(recordSprite, 7);
+		auto rankLabel = CCLabelBMFont::create(rankText, Fonts::Yellow);
+		rankLabel->setAnchorPoint(Vec2(0.5f, 0.5f));
+		rankLabel->setScale(_isWin ? 0.65f : 0.45f);
+		rankLabel->setPosition(Vec2(winSize.width / 2 + result_bg->getContentSize().width / 2 - 58, result_bg->getPositionY() - result_bg->getContentSize().height / 2 + 108));
+		addChild(rankLabel, 7);
 
 		if (_isWin && getGameLayer()->_isHardCoreGame)
 		{
@@ -496,14 +499,14 @@ void GameOver::onBackToMenu(Ref *sender)
 		auto exit_bg = Sprite::createWithSpriteFrameName("confirm_bg.png");
 		exit_bg->setPosition(Vec2(winSize.width / 2, winSize.height / 2));
 
-		auto comfirm_title = Sprite::createWithSpriteFrameName("confirm_title.png");
+				auto comfirm_title = CCLabelBMFont::create("EXIT GAME?", Fonts::Default);
+		comfirm_title->setScale(0.35f);
 		comfirm_title->setPosition(Vec2(winSize.width / 2, winSize.height / 2 + 38));
-
-		auto btm_text = Sprite::createWithSpriteFrameName("btm_text.png");
+		auto btm_text = CCLabelBMFont::create("RETURN TO MAIN MENU?", Fonts::Default);
+		btm_text->setScale(0.25f);
 		btm_text->setPosition(Vec2(winSize.width / 2, winSize.height / 2 + 8));
-
-		MenuItem *yes_btn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("yes_btn1.png"), Sprite::createWithSpriteFrameName("yes_btn2.png"), this, menu_selector(GameOver::onLeft));
-		MenuItem *no_btn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("no_btn1.png"), Sprite::createWithSpriteFrameName("no_btn2.png"), this, menu_selector(GameOver::onCancel));
+		MenuItem *yes_btn = CCMenuItemLabel::create(CCLabelBMFont::create("YES", Fonts::Default), this, menu_selector(GameOver::onLeft));
+		MenuItem *no_btn = CCMenuItemLabel::create(CCLabelBMFont::create("NO", Fonts::Default), this, menu_selector(GameOver::onCancel));
 
 		Menu *confirm_menu = Menu::create(yes_btn, no_btn, nullptr);
 		confirm_menu->alignItemsHorizontallyWithPadding(24);

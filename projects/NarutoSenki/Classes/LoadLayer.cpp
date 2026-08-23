@@ -1,5 +1,7 @@
 #include "LoadLayer.h"
 #include "GameMode/GameModeImpl.h"
+#include "Data/Fonts.h"
+#include "Data/UiText.h"
 
 LoadLayer::LoadLayer()
 {
@@ -28,9 +30,10 @@ bool LoadLayer::init()
 	FULL_SCREEN_SPRITE(menu_bar_t);
 	addChild(menu_bar_t, 2);
 
-	Sprite *loading_title = Sprite::createWithSpriteFrameName("loading_title.png");
+	CCLabelBMFont *loading_title = CCLabelBMFont::create("LOADING", Fonts::Default);
 	loading_title->setAnchorPoint(Vec2(0, 0));
-	loading_title->setPosition(Vec2(2, winSize.height - loading_title->getContentSize().height - 2));
+	loading_title->setScale(0.45f);
+	loading_title->setPosition(Vec2(2, winSize.height - 24));
 	addChild(loading_title, 3);
 
 	// produce the cloud
@@ -113,11 +116,16 @@ void LoadLayer::preloadIMG()
 
 	setRand();
 	int num = rand() % 3 + 1;
-	Sprite *tips = Sprite::createWithSpriteFrameName(format("tip{}.png", num).c_str());
+	auto tips = CCLabelBMFont::create(UiText::loadingTip(static_cast<uint8_t>(num)), Fonts::Default);
+	tips->setScale(0.28f);
+	tips->setWidth(420);
+	tips->setLineBreakWithoutSpace(true);
+	tips->setAlignment(kCCTextAlignmentCenter);
 	tips->setPosition(Vec2(winSize.width / 2, winSize.height / 2));
 	addChild(tips);
 
-	Sprite *loading = Sprite::createWithSpriteFrameName("loading_font.png");
+	auto loading = CCLabelBMFont::create("LOADING...", Fonts::Default);
+	loading->setScale(0.32f);
 	loading->setPosition(Vec2(winSize.width - 120, 45));
 	auto fade = FadeOut::create(1.0f);
 	auto fadeseq = RepeatForever::create(newSequence(fade, fade->reverse()));

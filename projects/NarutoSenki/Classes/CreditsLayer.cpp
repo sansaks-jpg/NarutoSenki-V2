@@ -1,6 +1,7 @@
 #include "CreditsLayer.h"
 #include "StartMenu.h"
 #include "Constants/UiFlowKeys.hpp"
+#include "Data/Fonts.h"
 
 bool CreditsLayer::init()
 {
@@ -46,23 +47,35 @@ bool CreditsLayer::init()
 	FULL_SCREEN_SPRITE(menu_bar_t);
 	addChild(menu_bar_t, 2);
 
-	auto staff_title = Sprite::createWithSpriteFrameName("staff_title.png");
+	// Text is rendered at runtime; the old staff/credits PNGs are no longer used.
+	auto staff_title = CCLabelBMFont::create("CREDITS", Fonts::Default);
 	staff_title->setAnchorPoint(Vec2(0, 0));
-	staff_title->setPosition(Vec2(2, winSize.height - staff_title->getContentSize().height - 2));
+	staff_title->setScale(0.45f);
+	staff_title->setPosition(Vec2(2, winSize.height - 24));
 	addChild(staff_title, 3);
 
-	auto credit01 = Sprite::createWithSpriteFrameName("credits01.png");
+	auto credit01 = CCLabelBMFont::create("NARUTO SENKI\nOpen-source fan project\n\nThanks to every contributor and tester.", Fonts::Default);
+	credit01->setAlignment(kCCTextAlignmentCenter);
+	credit01->setAnchorPoint(Vec2(0.5f, 0.5f));
+	credit01->setScale(0.28f);
+	credit01->setWidth(420);
+	credit01->setLineBreakWithoutSpace(true);
 	credit01->setPosition(Vec2(winSize.width / 2 - 20, winSize.height / 2 + 80));
 	addChild(credit01);
 
-	auto credit02 = Sprite::createWithSpriteFrameName("credits02.png");
+	auto credit02 = CCLabelBMFont::create("Credits\n\nOriginal concept and community resources\n\nAll rights reserved by their respective owners.", Fonts::Default);
+	credit02->setAlignment(kCCTextAlignmentCenter);
+	credit02->setAnchorPoint(Vec2(0.5f, 0.5f));
+	credit02->setScale(0.24f);
+	credit02->setWidth(440);
+	credit02->setLineBreakWithoutSpace(true);
 	credit02->setPosition(Vec2(winSize.width / 2 + 15, winSize.height / 2 - 60));
 	addChild(credit02);
 
-	auto returnBtnItem = MenuItemSprite::create(
-		Sprite::create("UI/return_btn.png"),
-		nullptr,
-		nullptr,
+	auto returnLabel = CCLabelBMFont::create("RETURN", Fonts::Default);
+	returnLabel->setScale(0.35f);
+	auto returnBtnItem = CCMenuItemLabel::create(
+		returnLabel,
 		this,
 		menu_selector(CreditsLayer::onReturnBtn));
 	auto returnBtnMenu = Menu::create(returnBtnItem, nullptr);

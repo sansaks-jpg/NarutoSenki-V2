@@ -2,6 +2,7 @@
 #include "GameLayer.h"
 #include "HudLayer.h"
 #include "Core/Hero.hpp"
+#include "Data/UiText.h"
 
 /*----------------------
 init GearButton ;
@@ -86,8 +87,7 @@ void GearButton::click()
 		_delegate->currentGear = _gearType;
 	}
 
-	auto frame = getSpriteFrame("gearDetail_{:02d}.png", (int)_gearType);
-	_delegate->gearDetail->setDisplayFrame(frame);
+		_delegate->setGearDetail(_gearType);
 
 #if (CC_TARGET_PLATFORM == CC_PLATFORM_LINUX) || (CC_TARGET_PLATFORM == CC_PLATFORM_WIN32) || (CC_TARGET_PLATFORM == CC_PLATFORM_MAC)
 	auto icon = getSpriteFrame("gear_{:02d}.png", (int)_gearType);
@@ -276,10 +276,14 @@ bool GearLayer::init(RenderTexture *snapshoot)
 	_screwLayer->screwBar->setPosition(Vec2(gears_bg->getPositionX() + 25, 126));
 	addChild(_screwLayer->screwBar, 600);
 
-	gearDetail = Sprite::createWithSpriteFrameName("gearDetail_00.png");
+	gearDetail = CCLabelBMFont::create("", Fonts::Default);
 	gearDetail->setAnchorPoint(Vec2(0.5f, 1));
+	gearDetail->setWidth(155);
+	gearDetail->setLineBreakWithoutSpace(true);
+	gearDetail->setScale(0.32f);
 	gearDetail->setPosition(Vec2(gears_bg->getPositionX() + gears_bg->getContentSize().width / 2 - 54, 210));
 	addChild(gearDetail, 600);
+	setGearDetail(GearType::Gear00);
 
 #if (CC_TARGET_PLATFORM == CC_PLATFORM_LINUX) || (CC_TARGET_PLATFORM == CC_PLATFORM_WIN32) || (CC_TARGET_PLATFORM == CC_PLATFORM_MAC)
 	gearBigIcon = Sprite::createWithSpriteFrameName("gear_00.png");
@@ -288,8 +292,9 @@ bool GearLayer::init(RenderTexture *snapshoot)
 	addChild(gearBigIcon, 600);
 #endif
 
-	MenuItem *buy_btn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("gearBuy_btn.png"),
-											   Sprite::createWithSpriteFrameName("gearBuy_btn2.png"), this, menu_selector(GearLayer::onGearBuy));
+	auto buy_label = CCLabelBMFont::create("BUY", Fonts::Default);
+	buy_label->setScale(0.38f);
+	MenuItem *buy_btn = CCMenuItemLabel::create(buy_label, this, menu_selector(GearLayer::onGearBuy));
 	Menu *gearMenu = Menu::create(buy_btn, nullptr);
 	gearMenu->setPosition(Vec2(gears_bg->getPositionX() + 78, 65));
 	addChild(gearMenu, 600);
@@ -333,6 +338,18 @@ void GearLayer::onGearBuy(Ref *sender)
 	{
 		updatePlayerGear();
 	}
+}
+
+void GearLayer::setGearDetail(GearType gear)
+{
+	if (!gearDetail || gear == GearType::None)
+		return;
+
+	const auto index = static_cast<uint8_t>(gear);
+	string detail = UiText::gearName(index);
+	detail += "\n";
+	detail += UiText::gearDescription(index);
+	gearDetail->setString(detail.c_str());
 }
 
 void GearLayer::updatePlayerGear()
@@ -398,8 +415,7 @@ void GearLayer::updateGearList()
 		if (currentGear == GearType::None && !isBuyed)
 		{
 			currentGear = GearType(i);
-			auto frame = getSpriteFrame("gearDetail_{:02d}.png", i);
-			gearDetail->setDisplayFrame(frame);
+			setGearDetail(currentGear);
 		}
 
 		btn->setPosition(Vec2(6 + column * 46, -row * 60));

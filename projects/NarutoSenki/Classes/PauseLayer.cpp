@@ -1,5 +1,6 @@
 #include "PauseLayer.h"
 #include "GameLayer.h"
+#include "Data/Fonts.h"
 
 bool PauseLayer::init(RenderTexture *snapshoot)
 {
@@ -31,31 +32,43 @@ bool PauseLayer::init(RenderTexture *snapshoot)
 	FULL_SCREEN_SPRITE(menu_bar_t);
 	addChild(menu_bar_t, 2);
 
-	Sprite *pause_title = Sprite::createWithSpriteFrameName("pause_title.png");
+	CCLabelBMFont *pause_title = CCLabelBMFont::create("PAUSE", Fonts::Default);
 	pause_title->setAnchorPoint(Vec2(0, 0));
-	pause_title->setPosition(Vec2(2, winSize.height - pause_title->getContentSize().height - 2));
+	pause_title->setScale(0.45f);
+	pause_title->setPosition(Vec2(2, winSize.height - 24));
 	addChild(pause_title, 3);
 
-	MenuItem *resume_btn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("resume.png"), nullptr, nullptr, this, menu_selector(PauseLayer::onResume));
-	MenuItem *btm_btn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("btm.png"), nullptr, nullptr, this, menu_selector(PauseLayer::onBackToMenu));
+	CCLabelBMFont *resume_label = CCLabelBMFont::create("RESUME", Fonts::Default);
+	resume_label->setScale(0.38f);
+	CCLabelBMFont *back_label = CCLabelBMFont::create("BACK TO MENU", Fonts::Default);
+	back_label->setScale(0.30f);
+	MenuItem *resume_btn = CCMenuItemLabel::create(resume_label, this, menu_selector(PauseLayer::onResume));
+	MenuItem *btm_btn = CCMenuItemLabel::create(back_label, this, menu_selector(PauseLayer::onBackToMenu));
 
 	pauseMenu = Menu::create(resume_btn, btm_btn, nullptr);
 	pauseMenu->alignItemsVerticallyWithPadding(26);
 	pauseMenu->setPosition(Vec2(winSize.width / 2, winSize.height / 2 + 30));
 	addChild(pauseMenu, 3);
 
-	Sprite *surrender_text = Sprite::createWithSpriteFrameName("surrender_tips.png");
+	CCLabelBMFont *surrender_text = CCLabelBMFont::create("SURRENDER?", Fonts::Default);
+	surrender_text->setScale(0.30f);
 	surrender_text->setPosition(Vec2(winSize.width / 2, winSize.height / 2 - 23));
 	addChild(surrender_text, 4);
 
-	bgm_btn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("bgm_on.png"), Sprite::createWithSpriteFrameName("bgm_off.png"), nullptr, this, menu_selector(PauseLayer::onBGM));
-	voice_btn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("voice_on.png"), Sprite::createWithSpriteFrameName("voice_off.png"), nullptr, this, menu_selector(PauseLayer::onVoice));
+	bgm_label = CCLabelBMFont::create("", Fonts::Default);
+	bgm_label->setScale(0.28f);
+	voice_label = CCLabelBMFont::create("", Fonts::Default);
+	voice_label->setScale(0.28f);
+	bgm_btn = CCMenuItemLabel::create(bgm_label, this, menu_selector(PauseLayer::onBGM));
+	voice_btn = CCMenuItemLabel::create(voice_label, this, menu_selector(PauseLayer::onVoice));
 	soundMenu = Menu::create(bgm_btn, voice_btn, nullptr);
 	soundMenu->alignItemsHorizontallyWithPadding(25);
 	soundMenu->setPosition(Vec2(pauseMenu->getPositionX(), pauseMenu->getPositionY() - 80));
 	addChild(soundMenu, 4);
 
-	pre_btn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("preload_on.png"), Sprite::createWithSpriteFrameName("preload_off.png"), nullptr, this, menu_selector(PauseLayer::onPreload));
+	pre_label = CCLabelBMFont::create("", Fonts::Default);
+	pre_label->setScale(0.28f);
+	pre_btn = CCMenuItemLabel::create(pre_label, this, menu_selector(PauseLayer::onPreload));
 	preMenu = Menu::create(pre_btn, nullptr);
 	preMenu->alignItemsHorizontallyWithPadding(25);
 	preMenu->setPosition(Vec2(pauseMenu->getPositionX(), preMenu->getPositionY() - 84));
@@ -74,12 +87,24 @@ bool PauseLayer::init(RenderTexture *snapshoot)
 	{
 		pre_btn->selected();
 	}
+	updateOptionLabels();
 
 	return true;
 }
 
+void PauseLayer::updateOptionLabels()
+{
+	if (bgm_label)
+		bgm_label->setString(UserDefault::sharedUserDefault()->getBoolForKey("isBGM") ? "BGM: ON" : "BGM: OFF");
+	if (voice_label)
+		voice_label->setString(UserDefault::sharedUserDefault()->getBoolForKey("isVoice") ? "VOICE: ON" : "VOICE: OFF");
+	if (pre_label)
+		pre_label->setString(UserDefault::sharedUserDefault()->getBoolForKey("isPreload") ? "PRELOAD: ON" : "PRELOAD: OFF");
+}
+
 void PauseLayer::onBGM(Ref *sender)
 {
+	(void)sender;
 	if (UserDefault::sharedUserDefault()->getBoolForKey("isBGM") == true)
 	{
 		UserDefault::sharedUserDefault()->setBoolForKey("isBGM", false);
@@ -90,10 +115,12 @@ void PauseLayer::onBGM(Ref *sender)
 		UserDefault::sharedUserDefault()->setBoolForKey("isBGM", true);
 		bgm_btn->unselected();
 	}
+	updateOptionLabels();
 }
 
 void PauseLayer::onVoice(Ref *sender)
 {
+	(void)sender;
 	if (UserDefault::sharedUserDefault()->getBoolForKey("isVoice") == true)
 	{
 		UserDefault::sharedUserDefault()->setBoolForKey("isVoice", false);
@@ -104,10 +131,12 @@ void PauseLayer::onVoice(Ref *sender)
 		UserDefault::sharedUserDefault()->setBoolForKey("isVoice", true);
 		voice_btn->unselected();
 	}
+	updateOptionLabels();
 }
 
 void PauseLayer::onPreload(Ref *sender)
 {
+	(void)sender;
 	if (UserDefault::sharedUserDefault()->getBoolForKey("isPreload") == true)
 	{
 		UserDefault::sharedUserDefault()->setBoolForKey("isPreload", false);
@@ -118,6 +147,7 @@ void PauseLayer::onPreload(Ref *sender)
 		UserDefault::sharedUserDefault()->setBoolForKey("isPreload", true);
 		pre_btn->unselected();
 	}
+	updateOptionLabels();
 }
 
 void PauseLayer::onResume(Ref *sender)
@@ -145,14 +175,16 @@ void PauseLayer::onBackToMenu(Ref *sender)
 	Sprite *exit_bg = Sprite::createWithSpriteFrameName("confirm_bg.png");
 	exit_bg->setPosition(Vec2(winSize.width / 2, winSize.height / 2));
 
-	Sprite *comfirm_title = Sprite::createWithSpriteFrameName("confirm_title.png");
+	CCLabelBMFont *comfirm_title = CCLabelBMFont::create("EXIT GAME?", Fonts::Default);
+	comfirm_title->setScale(0.35f);
 	comfirm_title->setPosition(Vec2(winSize.width / 2, winSize.height / 2 + 38));
 
-	Sprite *surrender_text = Sprite::createWithSpriteFrameName("surrender_text.png");
+	CCLabelBMFont *surrender_text = CCLabelBMFont::create("RETURN TO MAIN MENU?", Fonts::Default);
+	surrender_text->setScale(0.25f);
 	surrender_text->setPosition(Vec2(winSize.width / 2, winSize.height / 2 + 8));
 
-	MenuItem *yes_btn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("yes_btn1.png"), Sprite::createWithSpriteFrameName("yes_btn2.png"), this, menu_selector(PauseLayer::onLeft));
-	MenuItem *no_btn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("no_btn1.png"), Sprite::createWithSpriteFrameName("no_btn2.png"), this, menu_selector(PauseLayer::onCancel));
+	MenuItem *yes_btn = CCMenuItemLabel::create(CCLabelBMFont::create("YES", Fonts::Default), this, menu_selector(PauseLayer::onLeft));
+	MenuItem *no_btn = CCMenuItemLabel::create(CCLabelBMFont::create("NO", Fonts::Default), this, menu_selector(PauseLayer::onCancel));
 
 	Menu *confirm_menu = Menu::create(yes_btn, no_btn, nullptr);
 	confirm_menu->alignItemsHorizontallyWithPadding(24);

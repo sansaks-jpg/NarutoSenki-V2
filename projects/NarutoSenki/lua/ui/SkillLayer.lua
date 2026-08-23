@@ -97,16 +97,12 @@ function SkillLayer:init()
     menu_bar_t:fullScreen()
     self:addChild(menu_bar_t, 2)
 
-    local record_title = display.newSprite('#record_title.png')
+    local record_title = ns.text.keyLabel('record', 0.42)
     record_title:setAnchorPoint(0, 0)
-    record_title:setPosition(2, display.height -
-                                 record_title:getContentSize().height - 2)
+    record_title:setPosition(2, display.height - 24)
     self:addChild(record_title, 3)
 
-    local start_bt = ui.newImageMenuItem({
-        image = display.newSprite('#return_btn.png'),
-        listener = handler(self, SkillLayer.onCancel)
-    })
+    local start_bt = ns.text.keyMenuItem('return_to_menu', handler(self, SkillLayer.onCancel), 0.30, 'Audio/Menu/cancel.ogg')
     local menu = ui.newMenu({start_bt})
     menu:setPosition(display.width - 38, 86)
     self:addChild(menu, 5)
@@ -329,13 +325,14 @@ function SkillLayer:setSkillExplain(buttonType)
     audio.playSound('Audio/Menu/select.ogg')
     if self._skillExplain then self._skillExplain:removeFromParent() end
 
-    local imgPath
+    local skillIndex = buttonType - 2
+    local description
     if buttonType == SelectButton.Type.Unlock1 then
-        imgPath = 'fenglabel.png'
+        description = ns.text.characterName(self.selectHero) .. ' - UNLOCK SKILL 1'
     elseif buttonType == SelectButton.Type.Unlock2 then
-        imgPath = 'fenglabel2.png'
+        description = ns.text.characterName(self.selectHero) .. ' - UNLOCK SKILL 2'
     else
-        imgPath = self.selectHero .. '_label' .. (buttonType - 2) .. '.png'
+        description = ns.text.skillDescription(self.selectHero, skillIndex)
     end
 
     local clipper = CCClippingNode:create()
@@ -343,8 +340,10 @@ function SkillLayer:setSkillExplain(buttonType)
     stencil:setAnchorPoint(0, 0)
     clipper:setStencil(stencil)
 
-    self._skillExplain = display.newSprite('#' .. imgPath)
+    self._skillExplain = ns.text.label(description, 0.26)
     self._skillExplain:setAnchorPoint(0, 0)
+    self._skillExplain:setWidth(1200)
+    self._skillExplain:setLineBreakWithoutSpace(true)
     self._skillExplain:setPositionX(10)
 
     clipper:setPosition(display.cx - self.bgSprite:getContentSize().width / 2 +

@@ -90,10 +90,7 @@ function GameScene:onFinish()
     if not self.pushMenu then
         audio.playMusic(ns.music.INTRO_MUSIC, true)
 
-        local btm_btn = ui.newImageMenuItem({
-            image = 'push_start.png',
-            listener = handler(self, GameScene.onPush)
-        })
+        local btm_btn = ns.text.keyMenuItem('push_start', handler(self, GameScene.onPush), 0.34, ns.menu.CONFIRM)
         self.pushMenu = ui.newMenu({btm_btn})
         self.pushMenu:setPosition(display.width / 2, display.height / 2 - 100)
         self.introLayer:addChild(self.pushMenu)

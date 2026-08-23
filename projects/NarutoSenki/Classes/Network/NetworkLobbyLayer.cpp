@@ -10,11 +10,18 @@ using namespace cocos2d::extension;
 
 namespace
 {
-const char *kHeroChoices[] = {
-    "Naruto", "Sasuke", "Sakura", "Kakashi",
-    "Lee", "Gaara", "Itachi", "Minato", "Pain", "Jiraiya"
+const char *kAllSelectHeroes[] = {
+    "Naruto", "Sasuke", "Sakura", "Kakashi", "Lee",
+    "Gaara", "Itachi", "Minato", "Pain", "Jiraiya",
+    "Hiruzen", "Asuma", "Choji", "Deidara", "Hidan",
+    "Hinata", "Ino", "Jugo", "Kakuzu", "Kankuro",
+    "Karin", "Kiba", "Kimimaro", "Kisame", "Konan",
+    "Neji", "Orochimaru", "Sai", "Shikamaru", "Shino",
+    "Suigetsu", "Tenten", "Tobi", "Tobirama", "Tsunade"
 };
-constexpr int kHeroChoiceCount = sizeof(kHeroChoices) / sizeof(kHeroChoices[0]);
+constexpr int kAllSelectHeroCount = sizeof(kAllSelectHeroes) / sizeof(kAllSelectHeroes[0]);
+const char **kHeroChoices = kAllSelectHeroes;
+constexpr int kHeroChoiceCount = kAllSelectHeroCount;
 
 CCLabelBMFont *makeBMFont(const std::string &text, const char *fontFile, float scale = 0.45f)
 {
@@ -192,6 +199,10 @@ void NetworkLobbyLayer::renderPage()
     else if (_page == Page::Join && _session->state() == nsv2::network::SessionState::Idle)
     {
         renderJoinPage();
+    }
+    else if (_page == Page::HeroSelect)
+    {
+        renderHeroSelectPage();
     }
     else
     {
@@ -458,7 +469,7 @@ void NetworkLobbyLayer::renderHostPage()
         // Change Hero button placed below local player portrait (Left Side)
         auto changeBtn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("change_btn.png"),
                                                 Sprite::createWithSpriteFrameName("change_btn2.png"),
-                                                this, menu_selector(NetworkLobbyLayer::onCycleHero));
+                                                this, menu_selector(NetworkLobbyLayer::onOpenHeroSelect));
         changeBtn->setPosition(Vec2(winSize.width * 0.25f, 48));
         controlMenu->addChild(changeBtn);
 
@@ -493,6 +504,100 @@ void NetworkLobbyLayer::renderHostPage()
     }
 }
 
+void NetworkLobbyLayer::renderHeroSelectPage()
+{
+    setMessage("Tap character to preview. Double-click or tap OK to select hero.");
+
+    // Grid of 35 character avatar buttons on the left
+    // 7 columns x 5 rows
+    auto avatarMenu = Menu::create();
+    avatarMenu->setPosition(Vec2(0, 0));
+    addChild(avatarMenu, 5);
+
+    const int cols = 7;
+    const float startX = 24.0f;
+    const float stepX = 35.0f;
+    const float startY = winSize.height - 68.0f;
+    const float stepY = 38.0f;
+
+    for (int i = 0; i < kAllSelectHeroCount; ++i)
+    {
+        const int col = i % cols;
+        const int row = i / cols;
+        const float posX = startX + col * stepX;
+        const float posY = startY - row * stepY;
+
+        std::string selSpriteName = std::string(kAllSelectHeroes[i]) + "_select.png";
+        auto normalSprite = Sprite::createWithSpriteFrameName(selSpriteName.c_str());
+        if (!normalSprite)
+            normalSprite = Sprite::createWithSpriteFrameName("Naruto_select.png");
+        auto selectSprite = Sprite::createWithSpriteFrameName(selSpriteName.c_str());
+        if (!selectSprite)
+            selectSprite = Sprite::createWithSpriteFrameName("Naruto_select.png");
+
+        if (normalSprite && selectSprite)
+        {
+            auto item = MenuItemSprite::create(normalSprite, selectSprite, this, menu_selector(NetworkLobbyLayer::onHeroAvatarClicked));
+            item->setTag(i);
+            item->setPosition(Vec2(posX, posY));
+            avatarMenu->addChild(item);
+
+            // Highlight frame for currently previewed hero
+            if (_previewHeroName == kAllSelectHeroes[i])
+            {
+                auto blinkFrame = Sprite::createWithSpriteFrameName("Blink_select.png");
+                if (blinkFrame)
+                {
+                    blinkFrame->setPosition(Vec2(posX, posY));
+                    addChild(blinkFrame, 6);
+                }
+            }
+        }
+    }
+
+    // Right Side: Selected Character Preview (Half Portrait, Kanji Font, Name, OK Button)
+    const float previewCenterX = winSize.width - 95.0f;
+
+    // Kanji Font Logo
+    std::string fontSpriteName = _previewHeroName + "_font.png";
+    auto fontLogo = Sprite::createWithSpriteFrameName(fontSpriteName.c_str());
+    if (fontLogo)
+    {
+        fontLogo->setPosition(Vec2(previewCenterX, winSize.height - 68));
+        addChild(fontLogo, 4);
+    }
+
+    // Half Portrait
+    std::string halfSpriteName = _previewHeroName + "_half.png";
+    auto halfPortrait = Sprite::createWithSpriteFrameName(halfSpriteName.c_str());
+    if (!halfPortrait)
+        halfPortrait = Sprite::createWithSpriteFrameName("Naruto_half.png");
+    if (halfPortrait)
+    {
+        halfPortrait->setPosition(Vec2(previewCenterX, winSize.height / 2));
+        addChild(halfPortrait, 3);
+    }
+
+    // Hero Name text
+    auto heroNameLabel = makeBMFont(_previewHeroName, Fonts::Yellow, 0.46f);
+    heroNameLabel->setPosition(Vec2(previewCenterX, 76));
+    addChild(heroNameLabel, 4);
+
+    // Confirm OK Button
+    auto okNormal = Sprite::createWithSpriteFrameName("yes_btn1.png");
+    auto okSelect = Sprite::createWithSpriteFrameName("yes_btn2.png");
+    auto okLabel = makeBMFont("OK", Fonts::White, 0.42f);
+    okLabel->setPosition(Vec2(okNormal->getContentSize().width / 2, okNormal->getContentSize().height / 2));
+    okNormal->addChild(okLabel);
+
+    auto okBtn = MenuItemSprite::create(okNormal, okSelect, this, menu_selector(NetworkLobbyLayer::onConfirmHeroSelect));
+    okBtn->setPosition(Vec2(previewCenterX, 42));
+
+    auto confirmMenu = Menu::create(okBtn, nullptr);
+    confirmMenu->setPosition(Vec2(0, 0));
+    addChild(confirmMenu, 5);
+}
+
 void NetworkLobbyLayer::enterNetworkBattle()
 {
     if (_battleEntered || _session->state() != nsv2::network::SessionState::Battle)
@@ -513,7 +618,7 @@ void NetworkLobbyLayer::enterNetworkBattle()
 
 void NetworkLobbyLayer::update(float dt)
 {
-    (void)dt;
+    _totalRunningTime += dt;
     ++_frameCounter;
     if (_session->networkActive())
         _session->poll();
@@ -528,7 +633,7 @@ void NetworkLobbyLayer::update(float dt)
         _session->matchConfig().slots.size() > 1 &&
         _session->matchConfig().slots[1].heroName.empty())
     {
-        _session->setLocalHero(kHeroChoices[1]); // Sasuke for client default
+        _session->setLocalHero(kAllSelectHeroes[1]); // Sasuke for client default
     }
 
     if (_session->state() == nsv2::network::SessionState::Battle)
@@ -590,6 +695,14 @@ void NetworkLobbyLayer::onBack(Ref *sender)
         return;
 
     SimpleAudioEngine::sharedEngine()->playEffect("Audio/Menu/cancel.ogg");
+
+    if (_page == Page::HeroSelect)
+    {
+        _page = Page::Host;
+        renderPage();
+        return;
+    }
+
     _session->stop();
     _session->stopScan();
 
@@ -692,25 +805,69 @@ void NetworkLobbyLayer::onReady(Ref *sender)
     renderPage();
 }
 
-void NetworkLobbyLayer::onCycleHero(Ref *sender)
+void NetworkLobbyLayer::onOpenHeroSelect(Ref *sender)
 {
     (void)sender;
     SimpleAudioEngine::sharedEngine()->playEffect("Audio/Menu/select.ogg");
-    _localHeroIndex = (_localHeroIndex + 1) % kHeroChoiceCount;
-
-    // Avoid picking same hero as opponent
     const auto &config = _session->matchConfig();
-    const uint8_t opponentSlot = _session->localSlot() == 0 ? 1 : 0;
-    if (config.slots.size() > opponentSlot && config.slots[opponentSlot].heroName == kHeroChoices[_localHeroIndex])
+    const uint8_t mySlot = _session->localSlot();
+    if (config.slots.size() > mySlot && !config.slots[mySlot].heroName.empty())
+        _previewHeroName = config.slots[mySlot].heroName;
+    else
+        _previewHeroName = (_session->role() == nsv2::network::SessionRole::Host ? "Naruto" : "Sasuke");
+    _lastClickedHeroIndex = -1;
+    _page = Page::HeroSelect;
+    renderPage();
+}
+
+void NetworkLobbyLayer::onHeroAvatarClicked(Ref *sender)
+{
+    if (!sender)
+        return;
+    const int index = static_cast<MenuItem *>(sender)->getTag();
+    if (index < 0 || index >= kAllSelectHeroCount)
+        return;
+
+    const std::string clickedHero = kAllSelectHeroes[index];
+    const float now = _totalRunningTime;
+
+    // Check double-click on same hero
+    if (_lastClickedHeroIndex == index && (now - _lastHeroClickTime) < 0.45f)
     {
-        _localHeroIndex = (_localHeroIndex + 1) % kHeroChoiceCount;
+        _previewHeroName = clickedHero;
+        onConfirmHeroSelect(nullptr);
+        return;
     }
 
-    if (!_session->setLocalHero(kHeroChoices[_localHeroIndex]))
-        setMessage("Failed to select hero.");
-    else
-        setMessage(std::string("Hero selected: ") + kHeroChoices[_localHeroIndex]);
+    _lastClickedHeroIndex = index;
+    _lastHeroClickTime = now;
+    _previewHeroName = clickedHero;
+    SimpleAudioEngine::sharedEngine()->playEffect("Audio/Menu/select.ogg");
     renderPage();
+}
+
+void NetworkLobbyLayer::onConfirmHeroSelect(Ref *sender)
+{
+    (void)sender;
+    SimpleAudioEngine::sharedEngine()->playEffect("Audio/Menu/confirm.ogg");
+
+    // Avoid picking same hero as opponent if already chosen
+    const auto &config = _session->matchConfig();
+    const uint8_t opponentSlot = _session->localSlot() == 0 ? 1 : 0;
+    if (config.slots.size() > opponentSlot && config.slots[opponentSlot].heroName == _previewHeroName)
+    {
+        setMessage("Opponent already picked " + _previewHeroName + "! Choose another hero.");
+        return;
+    }
+
+    _session->setLocalHero(_previewHeroName);
+    _page = Page::Host;
+    renderPage();
+}
+
+void NetworkLobbyLayer::onCycleHero(Ref *sender)
+{
+    onOpenHeroSelect(sender);
 }
 
 void NetworkLobbyLayer::onStart(Ref *sender)

@@ -13,6 +13,7 @@ public:
         Home,
         Host,
         Join,
+        HeroSelect,
     };
 
     NetworkLobbyLayer();
@@ -28,6 +29,9 @@ public:
     void onRefresh(Ref *sender);
     void onJoinManual(Ref *sender);
     void onJoinRoom(Ref *sender);
+    void onOpenHeroSelect(Ref *sender);
+    void onHeroAvatarClicked(Ref *sender);
+    void onConfirmHeroSelect(Ref *sender);
     void onCycleHero(Ref *sender);
     void onReady(Ref *sender);
     void onStart(Ref *sender);
@@ -45,6 +49,7 @@ private:
     void renderHomePage();
     void renderHostPage();
     void renderJoinPage();
+    void renderHeroSelectPage();
     void enterNetworkBattle();
     void setMessage(const std::string &message);
     std::string selectedAddress() const;
@@ -63,4 +68,8 @@ private:
     bool _battleEntered = false;
     bool _leavingNetwork = false;
     int _localHeroIndex = 0;
+    std::string _previewHeroName = "Naruto";
+    int _lastClickedHeroIndex = -1;
+    float _lastHeroClickTime = 0.0f;
+    float _totalRunningTime = 0.0f;
 };

@@ -268,7 +268,10 @@ void NetworkLobbyLayer::update(float dt)
 {
     (void)dt;
     ++_frameCounter;
-    _session->poll();
+    // LAN is opt-in. Merely opening Network Home must not poll sockets or
+    // discovery; Host and Join enable the runtime explicitly.
+    if (_session->networkActive())
+        _session->poll();
 
     std::vector<nsv2::network::SessionNotice> notices;
     _session->drainNotices(notices);
@@ -292,7 +295,8 @@ void NetworkLobbyLayer::update(float dt)
     if (_session->state() != _lastSessionState)
         renderPage();
 
-    if (_page == Page::Join && _session->state() == nsv2::network::SessionState::Idle && _frameCounter % 10 == 0)
+    if (_page == Page::Join && _session->networkActive() &&
+        _session->state() == nsv2::network::SessionState::Idle && _frameCounter % 10 == 0)
     {
         std::vector<nsv2::network::RoomAdvertisement> rooms;
         _session->getRooms(rooms);

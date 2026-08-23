@@ -31,6 +31,9 @@ void testOfflineDoesNotOpenSocket()
     assert(offline.state() == SessionState::Idle);
     assert(!offline.networkActive());
     offline.poll();
+    std::vector<RoomAdvertisement> rooms;
+    offline.getRooms(rooms);
+    assert(rooms.empty());
     assert(!offline.networkActive());
 }
 

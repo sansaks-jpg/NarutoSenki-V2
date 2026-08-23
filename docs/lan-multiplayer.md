@@ -4,7 +4,7 @@
 
 Branch ini menambahkan fondasi multiplayer LAN 1v1 host-authoritative. Tombol `Custom/Network` pada start menu membuka screen Network yang memiliki alur `Host Room`, `Join Room`, discovery room berbasis UDP broadcast, manual `IP:port`, lobby, pilihan hero, ready, loaded barrier, dan transisi ke pipeline battle.
 
-Mode offline existing tidak membuka socket karena seluruh lifecycle LAN hanya dibuat dari `NetworkLobbyLayer` ketika pengguna memilih Network.
+Mode offline existing tidak membuka socket dan tidak menjalankan polling LAN. Transport UDP, worker, discovery, dan `LanSession::poll()` baru aktif setelah pengguna memilih `HOST ROOM` atau `JOIN ROOM`; sekadar membuka halaman Network Home tetap ringan.
 
 ## Supported MVP
 
@@ -18,7 +18,7 @@ Client tidak mengirim posisi final, HP, damage, hasil serangan, atau status mena
 
 `GameLayer::updateNetworkBattle` menjalankan fixed-timestep accumulator di atas callback `update(dt)`. Render tetap mengikuti frame rate perangkat, sedangkan tick network memakai `MatchConfig.tickRate`. Host mengirim snapshot posisi, HP, CKR, state, dan facing untuk entity yang tersedia. Client menerapkan snapshot hanya pada entity remote; input lokal dapat diterapkan lebih cepat melalui queue command, lalu dikoreksi oleh snapshot host.
 
-Semua event hasil polling socket masuk ke queue internal transport. Hanya main thread yang memanggil `LanSession::poll()` dan menyentuh `GameLayer`, `Hero`, atau node Cocos2d-x.
+Semua event hasil polling socket masuk ke queue internal transport. Hanya main thread yang memanggil `LanSession::poll()` dan menyentuh `GameLayer`, `Hero`, atau node Cocos2d-x. Pada mode offline atau halaman Network Home tanpa session aktif, polling dilewati sepenuhnya.
 
 ## Protocol
 

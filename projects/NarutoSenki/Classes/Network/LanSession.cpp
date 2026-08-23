@@ -580,6 +580,10 @@ void LanSession::handleTransportEvents(const std::vector<TransportEvent> &events
 
 void LanSession::poll()
 {
+    // LAN is opt-in: offline/training sessions must not touch transport or discovery.
+    if (!networkActive())
+        return;
+
     const uint64_t currentMs = nowMs();
     std::vector<TransportEvent> events;
     _transport.poll(events);
@@ -623,6 +627,9 @@ void LanSession::stopScan()
 
 void LanSession::getRooms(std::vector<RoomAdvertisement> &rooms)
 {
+    rooms.clear();
+    if (!networkActive())
+        return;
     _discovery.poll(rooms);
 }
 

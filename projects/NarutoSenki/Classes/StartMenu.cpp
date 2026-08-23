@@ -1,4 +1,5 @@
 #include "StartMenu.h"
+#include "Data/UiText.h"
 
 GameMode s_GameMode = GameMode::Classic;
 std::array<std::unique_ptr<IGameModeHandler>, GameMode::__Internal_Max_Length> s_ModeHandlers = {
@@ -137,8 +138,7 @@ void MenuButton::ccTouchEnded(Touch *touch, Event *event)
 			break;
 		case MenuButtonType::HardCore:
 			SimpleAudioEngine::sharedEngine()->playEffect(SELECT_SOUND);
-			auto frame = getSpriteFrame("menu05_text.png");
-			_startMenu->menuText->setDisplayFrame(frame);
+				_startMenu->menuText->setString(UiText::menuTitle(4));
 			_startMenu->onHardLayerCallBack();
 			break;
 		}
@@ -303,8 +303,9 @@ bool StartMenu::init()
 	exit_btn->setPositionY(_pos01);
 	_menuArray.push_back(exit_btn);
 
-	menuText = Sprite::createWithSpriteFrameName("menu02_text.png");
+	menuText = CCLabelBMFont::create(UiText::menuTitle(1), Fonts::Default);
 	menuText->setAnchorPoint(Vec2(0, 0));
+	menuText->setScale(0.45f);
 	menuText->setPosition(Vec2(10, 2));
 	addChild(menuText, 5);
 
@@ -491,14 +492,16 @@ void StartMenu::onHardLayerCallBack()
 			Sprite *confirm_bg = Sprite::createWithSpriteFrameName("confirm_bg.png");
 			confirm_bg->setPosition(Vec2(winSize.width / 2, winSize.height / 2));
 
-			Sprite *hardcore_title = Sprite::createWithSpriteFrameName("hardcore_title.png");
-			hardcore_title->setPosition(Vec2(winSize.width / 2, winSize.height / 2 + 38));
+				auto hardcore_title = CCLabelBMFont::create("HARDCORE MODE?", Fonts::Default);
+				hardcore_title->setScale(0.32f);
+				hardcore_title->setPosition(Vec2(winSize.width / 2, winSize.height / 2 + 38));
 
-			Sprite *hardcore_text = Sprite::createWithSpriteFrameName("hardcore_text.png");
-			hardcore_text->setPosition(Vec2(winSize.width / 2, winSize.height / 2 + 8));
+				auto hardcore_text = CCLabelBMFont::create("DISABLE GEAR?", Fonts::Default);
+				hardcore_text->setScale(0.30f);
+				hardcore_text->setPosition(Vec2(winSize.width / 2, winSize.height / 2 + 8));
 
-			MenuItem *yes_btn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("yes_btn1.png"), Sprite::createWithSpriteFrameName("yes_btn2.png"), this, menu_selector(StartMenu::onHardCoreOn));
-			MenuItem *no_btn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("no_btn1.png"), Sprite::createWithSpriteFrameName("no_btn2.png"), this, menu_selector(StartMenu::onHardCoreOff));
+				MenuItem *yes_btn = CCMenuItemLabel::create(CCLabelBMFont::create("YES", Fonts::Default), this, menu_selector(StartMenu::onHardCoreOn));
+				MenuItem *no_btn = CCMenuItemLabel::create(CCLabelBMFont::create("NO", Fonts::Default), this, menu_selector(StartMenu::onHardCoreOff));
 
 			Menu *confirm_menu = Menu::create(yes_btn, no_btn, nullptr);
 			confirm_menu->alignItemsHorizontallyWithPadding(24);
@@ -628,33 +631,33 @@ void StartMenu::scrollMenu(int posY)
 		}
 	}
 
-	string src;
+	uint8_t selectedMenu = 1;
 	for (auto menu : _menuArray)
 	{
 		if (menu->_isTop)
 		{
 			switch (menu->getBtnType())
 			{
-			case MenuButtonType::Training:
-				src = "menu02_text.png";
-				break;
-			case MenuButtonType::Custom:
-				src = "menu01_text.png";
-				break;
-			case MenuButtonType::Credits:
-				src = "menu04_text.png";
-				break;
-			case MenuButtonType::Exit:
-				src = "menu03_text.png";
-				break;
-			default:
-				break;
-			}
+				case MenuButtonType::Training:
+					selectedMenu = 1;
+					break;
+				case MenuButtonType::Custom:
+					selectedMenu = 0;
+					break;
+				case MenuButtonType::Credits:
+					selectedMenu = 3;
+					break;
+				case MenuButtonType::Exit:
+					selectedMenu = 2;
+					break;
+				default:
+					break;
+				}
+
 		}
 	}
 
-	auto frame = getSpriteFrame(src);
-	menuText->setDisplayFrame(frame);
+	menuText->setString(UiText::menuTitle(selectedMenu));
 }
 
 void StartMenu::keyBackClicked()

@@ -28,6 +28,7 @@ require 'utils.event'
 require 'utils.utils'
 require 'utils.save'
 require 'utils.math'
+require 'utils.localization'
 
 require 'core.init'
 

@@ -10,9 +10,12 @@ public:
 	Menu *soundMenu = nullptr;
 	Menu *preMenu = nullptr;
 	Layer *exitLayer = nullptr;
-	MenuItem *bgm_btn = nullptr;
-	MenuItem *voice_btn = nullptr;
-	MenuItem *pre_btn = nullptr;
+	CCMenuItemLabel *bgm_btn = nullptr;
+	CCMenuItemLabel *voice_btn = nullptr;
+	CCMenuItemLabel *pre_btn = nullptr;
+	CCLabelBMFont *bgm_label = nullptr;
+	CCLabelBMFont *voice_label = nullptr;
+	CCLabelBMFont *pre_label = nullptr;
 
 	static PauseLayer *create(RenderTexture *snapshoot);
 
@@ -24,4 +27,5 @@ private:
 	void onBGM(Ref *sender);
 	void onPreload(Ref *sender);
 	void onVoice(Ref *sender);
+	void updateOptionLabels();
 };

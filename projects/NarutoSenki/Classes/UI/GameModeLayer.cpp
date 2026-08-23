@@ -2,6 +2,8 @@
 #include "UI/GameModeLayer.h"
 #include "UI/ModeMenuButton.hpp"
 #include "Constants/UiFlowKeys.hpp"
+#include "Data/UiText.h"
+#include "Data/Fonts.h"
 
 extern const GameData kDefaultGameData;
 
@@ -31,9 +33,10 @@ bool GameModeLayer::init()
 	FULL_SCREEN_SPRITE(menu_bar_t);
 	addChild(menu_bar_t, 2);
 
-	auto modemenu_title = Sprite::createWithSpriteFrameName("startmenu_title.png");
+	auto modemenu_title = CCLabelBMFont::create(UiText::common("game_modes"), Fonts::Default);
 	modemenu_title->setAnchorPoint(Vec2(0, 0));
-	modemenu_title->setPosition(Vec2(2, winSize.height - modemenu_title->getContentSize().height - 2));
+	modemenu_title->setScale(0.42f);
+	modemenu_title->setPosition(Vec2(2, winSize.height - 24));
 	addChild(modemenu_title, 3);
 
 	initModeData();
@@ -47,6 +50,7 @@ bool GameModeLayer::init()
 	{
 		auto mode_btn = ModeMenuButton::create(format("GameMode/{}.png", i + 1));
 		mode_btn->mode = (GameMode)i;
+		mode_btn->setTitle(UiText::modeTitle(static_cast<uint8_t>(i)));
 		mode_btn->setDelegate(this);
 		mode_btn->setPositionX(offset);
 		mode_btn->setPositionY((posY + 55 + 7.5f) - i * (55 + 7.5f));
@@ -57,6 +61,7 @@ bool GameModeLayer::init()
 	{
 		auto mode_btn = ModeMenuButton::create(format("GameMode/{}.png", i + 1));
 		mode_btn->mode = (GameMode)i;
+		mode_btn->setTitle(UiText::modeTitle(static_cast<uint8_t>(i)));
 		mode_btn->setDelegate(this);
 		mode_btn->setPositionX(offset + 10 + (i - 2) * (80 + 5));
 		mode_btn->setPositionY(posY);
@@ -72,6 +77,7 @@ bool GameModeLayer::init()
 	{
 		auto mode_btn = ModeMenuButton::create(format("GameMode/{}.png", i + 1));
 		mode_btn->mode = (GameMode)i;
+		mode_btn->setTitle(UiText::modeTitle(static_cast<uint8_t>(i)));
 		mode_btn->setDelegate(this);
 		mode_btn->setPositionX(offset + 20 + (80 + 5) * 4);
 		mode_btn->setPositionY((posY + 47) - (i - 6) * (86 + 8.0f));
@@ -93,8 +99,10 @@ bool GameModeLayer::init()
 	menuLabel->setPosition(Vec2(10, 2));
 	addChild(menuLabel, 5);
 
-	// init return button
-	auto return_img = MenuItemSprite::create(Sprite::create("UI/return_btn.png"), nullptr, nullptr, this, menu_selector(GameModeLayer::backToMenu));
+	// init return button with runtime text instead of a text-bearing PNG
+	auto return_label = CCLabelBMFont::create(UiText::common("return"), Fonts::Default);
+	return_label->setScale(0.35f);
+	auto return_img = CCMenuItemLabel::create(return_label, this, menu_selector(GameModeLayer::backToMenu));
 	Menu *return_btn = Menu::create(return_img, nullptr);
 	return_btn->setAnchorPoint(Vec2(1, 0.5f));
 	return_btn->setPosition(winSize.width - 38, 65);

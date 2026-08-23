@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include "CharacterBase.h"
 #include "Core/Warrior/Flog.hpp"
 #include "Core/Utils/UnitEx.hpp"
@@ -93,7 +94,7 @@ public:
 
 		getGameLayer()->clearAllFlogsMainTarget(this);
 
-		std::erase(getGameLayer()->_TowerArray, this);
+		getGameLayer()->_TowerArray.erase(std::remove(getGameLayer()->_TowerArray.begin(), getGameLayer()->_TowerArray.end(), this), getGameLayer()->_TowerArray.end());
 		getGameLayer()->setTowerState(getCharId());
 		getGameLayer()->checkTower();
 		removeFromParent();

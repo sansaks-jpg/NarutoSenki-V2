@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include "Core/Provider.hpp"
 #include "Core/Utils/UnitEx.hpp"
 #include "GameMode/IGameModeHandler.hpp"
@@ -113,7 +114,7 @@ public:
 				// TODO: Remove all Clone
 
 				c->removeAllClones();
-				std::erase(getGameLayer()->_CharacterArray, c);
+				getGameLayer()->_CharacterArray.erase(std::remove(getGameLayer()->_CharacterArray.begin(), getGameLayer()->_CharacterArray.end(), c), getGameLayer()->_CharacterArray.end());
 				getGameLayer()->clearAllFlogsMainTarget(c);
 
 				if (c->_shadow)

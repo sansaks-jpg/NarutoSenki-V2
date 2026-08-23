@@ -2966,7 +2966,7 @@ void CharacterBase::removeAllClones()
 	{
 		if (c->getMaster() == this)
 		{
-			std::erase(unitArray, c);
+			unitArray.erase(std::remove(unitArray.begin(), unitArray.end(), c), unitArray.end());
 		}
 	}
 }

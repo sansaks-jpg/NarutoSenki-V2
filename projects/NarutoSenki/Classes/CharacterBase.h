@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include "Core/Utils/Parser.hpp"
 #include "Data/UnitData.h"
 #include "Effect.h"
@@ -543,7 +544,7 @@ public:
 	bool hasMonsterArrayAny() { return !_monsterArray.empty(); }
 	void removeMon(CharacterBase *mo) {
 		if (hasMonsterArrayAny())
-			std::erase(_monsterArray, mo);
+			_monsterArray.erase(std::remove(_monsterArray.begin(), _monsterArray.end(), mo), _monsterArray.end());
 	}
 	void removeAllMonAndCleanup(const string &name) {
 		if (hasMonsterArrayAny()) {
@@ -551,7 +552,7 @@ public:
 			{
 				if (mo->getName() == name)
 				{
-					std::erase(_monsterArray, mo);
+					_monsterArray.erase(std::remove(_monsterArray.begin(), _monsterArray.end(), mo), _monsterArray.end());
 					mo->removeFromParent();
 				}
 			}

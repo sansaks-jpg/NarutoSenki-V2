@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include "CharacterBase.h"
 #include "HPBar.h"
 
@@ -128,9 +129,9 @@ protected:
 		stopAllActions();
 
 		if (isKonohaGroup())
-			std::erase(getGameLayer()->_KonohaFlogArray, this);
+			getGameLayer()->_KonohaFlogArray.erase(std::remove(getGameLayer()->_KonohaFlogArray.begin(), getGameLayer()->_KonohaFlogArray.end(), this), getGameLayer()->_KonohaFlogArray.end());
 		else
-			std::erase(getGameLayer()->_AkatsukiFlogArray, this);
+			getGameLayer()->_AkatsukiFlogArray.erase(std::remove(getGameLayer()->_AkatsukiFlogArray.begin(), getGameLayer()->_AkatsukiFlogArray.end(), this), getGameLayer()->_AkatsukiFlogArray.end());
 
 		removeFromParent();
 	}

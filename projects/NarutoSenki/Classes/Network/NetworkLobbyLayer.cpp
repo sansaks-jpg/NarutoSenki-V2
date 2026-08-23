@@ -23,11 +23,42 @@ constexpr int kAllSelectHeroCount = sizeof(kAllSelectHeroes) / sizeof(kAllSelect
 const char **kHeroChoices = kAllSelectHeroes;
 constexpr int kHeroChoiceCount = kAllSelectHeroCount;
 
-CCLabelBMFont *makeBMFont(const std::string &text, const char *fontFile, float scale = 0.45f)
+CCLabelBMFont *makeBMFont(const std::string &text, const char *fontFile = Fonts::Default, float scale = 0.55f)
 {
-    auto label = CCLabelBMFont::create(text.c_str(), fontFile);
-    label->setScale(scale);
+    auto label = CCLabelBMFont::create(text.c_str(), (fontFile && fontFile[0]) ? fontFile : Fonts::Default);
+    if (!label)
+        label = CCLabelBMFont::create(text.c_str(), Fonts::Default);
+    if (label)
+        label->setScale(scale);
     return label;
+}
+
+MenuItemSprite *makeButton(const std::string &text, const CCSize &size, Ref *target, SEL_MenuHandler selector, float fontScale = 0.55f)
+{
+    auto normalBg = CCScale9Sprite::createWithSpriteFrameName("input_bg.png", CCRect(10, 8, 10, 8));
+    if (normalBg)
+        normalBg->setContentSize(size);
+    auto labelNormal = makeBMFont(text, Fonts::Default, fontScale);
+    if (normalBg && labelNormal)
+    {
+        labelNormal->setPosition(Vec2(size.width / 2, size.height / 2));
+        normalBg->addChild(labelNormal);
+    }
+
+    auto selectBg = CCScale9Sprite::createWithSpriteFrameName("input_bg.png", CCRect(10, 8, 10, 8));
+    if (selectBg)
+    {
+        selectBg->setContentSize(size);
+        selectBg->setColor(ccc3(200, 200, 140));
+    }
+    auto labelSelect = makeBMFont(text, Fonts::Default, fontScale);
+    if (selectBg && labelSelect)
+    {
+        labelSelect->setPosition(Vec2(size.width / 2, size.height / 2));
+        selectBg->addChild(labelSelect);
+    }
+
+    return MenuItemSprite::create(normalBg, selectBg, target, selector);
 }
 } // namespace
 
@@ -168,12 +199,12 @@ void NetworkLobbyLayer::renderHeader()
         addChild(startmenu_title, 3);
     }
 
-    auto titleText = makeBMFont("LAN MULTIPLAYER", Fonts::Yellow, 0.52f);
+    auto titleText = makeBMFont("LAN MULTIPLAYER", Fonts::Default, 0.65f);
     titleText->setPosition(Vec2(winSize.width / 2, winSize.height - 18));
     addChild(titleText, 4);
 
     // Status label at bottom
-    _statusLabel = CCLabelTTF::create(_message.c_str(), FONT_NAME, 11);
+    _statusLabel = CCLabelTTF::create(_message.c_str(), "", 11);
     _statusLabel->setAnchorPoint(Vec2(0, 0));
     _statusLabel->setPosition(Vec2(12, 4));
     addChild(_statusLabel, 5);
@@ -230,29 +261,17 @@ void NetworkLobbyLayer::renderHomePage()
         addChild(panel, 3);
     }
 
-    auto modeTitle = makeBMFont("SELECT NETWORK ROLE", Fonts::Yellow, 0.48f);
+    auto modeTitle = makeBMFont("SELECT NETWORK ROLE", Fonts::Default, 0.58f);
     modeTitle->setPosition(Vec2(winSize.width / 2, winSize.height / 2 + 50));
     addChild(modeTitle, 4);
 
-    auto desc = CCLabelTTF::create("Ensure both devices are connected to the same Wi-Fi / Hotspot", FONT_NAME, 10);
+    auto desc = CCLabelTTF::create("Ensure both devices are connected to the same Wi-Fi / Hotspot", "", 10);
     desc->setPosition(Vec2(winSize.width / 2, winSize.height / 2 + 25));
     addChild(desc, 4);
 
-    // Host Button
-    auto hostNormal = Sprite::createWithSpriteFrameName("yes_btn1.png");
-    auto hostSelect = Sprite::createWithSpriteFrameName("yes_btn2.png");
-    auto hostLabel = makeBMFont("HOST", Fonts::White, 0.42f);
-    hostLabel->setPosition(Vec2(hostNormal->getContentSize().width / 2, hostNormal->getContentSize().height / 2));
-    hostNormal->addChild(hostLabel);
-    auto hostBtn = MenuItemSprite::create(hostNormal, hostSelect, this, menu_selector(NetworkLobbyLayer::onHost));
-
-    // Join Button
-    auto joinNormal = Sprite::createWithSpriteFrameName("no_btn1.png");
-    auto joinSelect = Sprite::createWithSpriteFrameName("no_btn2.png");
-    auto joinLabel = makeBMFont("JOIN", Fonts::White, 0.42f);
-    joinLabel->setPosition(Vec2(joinNormal->getContentSize().width / 2, joinNormal->getContentSize().height / 2));
-    joinNormal->addChild(joinLabel);
-    auto joinBtn = MenuItemSprite::create(joinNormal, joinSelect, this, menu_selector(NetworkLobbyLayer::onJoin));
+    // Clean Host and Join Buttons (using input_bg.png nine-patch without baked text)
+    auto hostBtn = makeButton("HOST", CCSize(95, 30), this, menu_selector(NetworkLobbyLayer::onHost), 0.60f);
+    auto joinBtn = makeButton("JOIN", CCSize(95, 30), this, menu_selector(NetworkLobbyLayer::onJoin), 0.60f);
 
     auto menu = Menu::create(hostBtn, joinBtn, nullptr);
     menu->alignItemsHorizontallyWithPadding(30);
@@ -273,7 +292,7 @@ void NetworkLobbyLayer::renderJoinPage()
         addChild(panel, 3);
     }
 
-    auto joinTitle = makeBMFont("SEARCH OR ENTER HOST IP", Fonts::Yellow, 0.46f);
+    auto joinTitle = makeBMFont("SEARCH OR ENTER HOST IP", Fonts::Default, 0.52f);
     joinTitle->setPosition(Vec2(winSize.width / 2, winSize.height / 2 + 75));
     addChild(joinTitle, 4);
 
@@ -284,19 +303,12 @@ void NetworkLobbyLayer::renderJoinPage()
     _ipEditBox->setPlaceHolder("192.168.x.x:28765");
     _ipEditBox->setInputMode(kEditBoxInputModeSingleLine);
     _ipEditBox->setReturnType(kKeyboardReturnTypeGo);
-    _ipEditBox->setFont(FONT_NAME, 12);
+    _ipEditBox->setFont("", 12);
     _ipEditBox->setFontColor(ccc3(255, 255, 255));
     _ipEditBox->setDelegate(this);
     addChild(_ipEditBox, 4);
 
-    auto joinNormal = Sprite::createWithSpriteFrameName("yes_btn1.png");
-    joinNormal->setScale(0.75f);
-    auto joinSelect = Sprite::createWithSpriteFrameName("yes_btn2.png");
-    joinSelect->setScale(0.75f);
-    auto joinLabel = makeBMFont("JOIN", Fonts::White, 0.40f);
-    joinLabel->setPosition(Vec2(joinNormal->getContentSize().width / 2, joinNormal->getContentSize().height / 2));
-    joinNormal->addChild(joinLabel);
-    auto joinBtn = MenuItemSprite::create(joinNormal, joinSelect, this, menu_selector(NetworkLobbyLayer::onJoinManual));
+    auto joinBtn = makeButton("JOIN", CCSize(65, 26), this, menu_selector(NetworkLobbyLayer::onJoinManual), 0.50f);
 
     auto refreshBtn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("refresh_btn.png"),
                                              Sprite::createWithSpriteFrameName("refresh_btn.png"),
@@ -323,7 +335,7 @@ void NetworkLobbyLayer::updateRoomListUI()
     float roomY = winSize.height / 2 - 5;
     if (_rooms.empty())
     {
-        auto empty = CCLabelTTF::create("Searching for rooms on network... (Host must create room first)", FONT_NAME, 11);
+        auto empty = CCLabelTTF::create("Searching for rooms on network... (Host must create room first)", "", 11);
         empty->setPosition(Vec2(winSize.width / 2, roomY - 15));
         _roomListContainer->addChild(empty, 4);
     }
@@ -336,13 +348,10 @@ void NetworkLobbyLayer::updateRoomListUI()
         {
             const auto &room = _rooms[i];
             std::ostringstream labelText;
-            labelText << room.roomName << "  (" << static_cast<int>(room.playerCount) << "/"
-                      << static_cast<int>(room.maxPlayers) << ")  " << room.address;
+            labelText << room.roomName << " (" << static_cast<int>(room.playerCount) << "/"
+                      << static_cast<int>(room.maxPlayers) << ") " << room.address;
 
-            auto item = CCMenuItemFont::create(labelText.str().c_str(), this, menu_selector(NetworkLobbyLayer::onJoinRoom));
-            item->setFontName(FONT_NAME);
-            item->setFontSize(13);
-            item->setColor(ccc3(255, 230, 150));
+            auto item = makeButton(labelText.str(), CCSize(winSize.width - 90, 24), this, menu_selector(NetworkLobbyLayer::onJoinRoom), 0.42f);
             item->setTag(static_cast<int>(i));
             item->setPosition(Vec2(winSize.width / 2, roomY));
             roomMenu->addChild(item);
@@ -391,7 +400,7 @@ void NetworkLobbyLayer::renderHostPage()
         std::string myName = config.slots.size() > mySlot && !config.slots[mySlot].playerName.empty()
                                  ? config.slots[mySlot].playerName
                                  : (_session->role() == nsv2::network::SessionRole::Host ? "Host" : "Client");
-        auto p1Label = makeBMFont(myName, Fonts::White, 0.42f);
+        auto p1Label = makeBMFont(myName, Fonts::Default, 0.48f);
         p1Label->setPosition(Vec2(banner1->getContentSize().width / 2 + 10, banner1->getContentSize().height / 2));
         banner1->addChild(p1Label);
     }
@@ -408,23 +417,23 @@ void NetworkLobbyLayer::renderHostPage()
         addChild(heroPortrait0, 2);
     }
 
-    auto heroNameLabel0 = makeBMFont(myHero, Fonts::Yellow, 0.44f);
+    auto heroNameLabel0 = makeBMFont(myHero, Fonts::Default, 0.55f);
     heroNameLabel0->setPosition(Vec2(winSize.width * 0.25f, 96));
     addChild(heroNameLabel0, 3);
 
     bool myReady = config.slots.size() > mySlot && config.slots[mySlot].ready;
-    auto readyLabel0 = makeBMFont(myReady ? "READY" : "WAITING", myReady ? Fonts::Yellow : Fonts::White, 0.40f);
+    auto readyLabel0 = makeBMFont(myReady ? "READY" : "WAITING", Fonts::Default, 0.48f);
     readyLabel0->setPosition(Vec2(winSize.width * 0.25f, 78));
     addChild(readyLabel0, 3);
 
     // ==========================================
     // CENTER: VS Sign & Role Info
     // ==========================================
-    auto vsLabel = makeBMFont("VS", Fonts::Yellow, 0.85f);
+    auto vsLabel = makeBMFont("VS", Fonts::Default, 0.85f);
     vsLabel->setPosition(Vec2(winSize.width / 2, winSize.height / 2 + 25));
     addChild(vsLabel, 3);
 
-    auto subStatus = CCLabelTTF::create((_session->role() == nsv2::network::SessionRole::Host ? "HOST" : "CLIENT"), FONT_NAME, 12);
+    auto subStatus = CCLabelTTF::create((_session->role() == nsv2::network::SessionRole::Host ? "HOST" : "CLIENT"), "", 12);
     subStatus->setPosition(Vec2(winSize.width / 2, winSize.height / 2 - 5));
     addChild(subStatus, 3);
 
@@ -447,7 +456,7 @@ void NetworkLobbyLayer::renderHostPage()
         std::string oppName = config.slots.size() > oppSlot && !config.slots[oppSlot].playerName.empty()
                                  ? config.slots[oppSlot].playerName
                                  : (_session->state() == nsv2::network::SessionState::Hosting ? "Waiting..." : (_session->role() == nsv2::network::SessionRole::Host ? "Client" : "Host"));
-        auto p2Label = makeBMFont(oppName, Fonts::White, 0.42f);
+        auto p2Label = makeBMFont(oppName, Fonts::Default, 0.48f);
         p2Label->setPosition(Vec2(banner2->getContentSize().width / 2 + 10, banner2->getContentSize().height / 2));
         banner2->addChild(p2Label);
     }
@@ -467,13 +476,13 @@ void NetworkLobbyLayer::renderHostPage()
         addChild(heroPortrait1, 2);
     }
 
-    auto heroNameLabel1 = makeBMFont((_session->state() == nsv2::network::SessionState::Hosting ? "-" : oppHero), Fonts::Yellow, 0.44f);
+    auto heroNameLabel1 = makeBMFont((_session->state() == nsv2::network::SessionState::Hosting ? "WAITING..." : oppHero), Fonts::Default, 0.55f);
     heroNameLabel1->setPosition(Vec2(winSize.width * 0.75f, 96));
     addChild(heroNameLabel1, 3);
 
     bool oppReady = config.slots.size() > oppSlot && config.slots[oppSlot].ready;
     auto readyLabel1 = makeBMFont((_session->state() == nsv2::network::SessionState::Hosting ? "WAIT" : (oppReady ? "READY" : "WAITING")),
-                                  oppReady ? Fonts::Yellow : Fonts::White, 0.40f);
+                                  Fonts::Default, 0.48f);
     readyLabel1->setPosition(Vec2(winSize.width * 0.75f, 78));
     addChild(readyLabel1, 3);
 
@@ -494,12 +503,7 @@ void NetworkLobbyLayer::renderHostPage()
         controlMenu->addChild(changeBtn);
 
         // Ready Button in center
-        auto readyNormal = Sprite::createWithSpriteFrameName(_session->localReady() ? "no_btn1.png" : "yes_btn1.png");
-        auto readySelect = Sprite::createWithSpriteFrameName(_session->localReady() ? "no_btn2.png" : "yes_btn2.png");
-        auto readyText = makeBMFont(_session->localReady() ? "CANCEL" : "READY", Fonts::White, 0.40f);
-        readyText->setPosition(Vec2(readyNormal->getContentSize().width / 2, readyNormal->getContentSize().height / 2));
-        readyNormal->addChild(readyText);
-        auto readyBtn = MenuItemSprite::create(readyNormal, readySelect, this, menu_selector(NetworkLobbyLayer::onReady));
+        auto readyBtn = makeButton(_session->localReady() ? "CANCEL" : "READY", CCSize(95, 30), this, menu_selector(NetworkLobbyLayer::onReady), 0.55f);
         readyBtn->setPosition(Vec2(winSize.width / 2, 50));
         controlMenu->addChild(readyBtn);
 
@@ -592,18 +596,12 @@ void NetworkLobbyLayer::renderHeroSelectPage()
     }
 
     // Hero Name text
-    auto heroNameLabel = makeBMFont(_previewHeroName, Fonts::Yellow, 0.46f);
+    auto heroNameLabel = makeBMFont(_previewHeroName, Fonts::Default, 0.55f);
     heroNameLabel->setPosition(Vec2(previewCenterX, 76));
     addChild(heroNameLabel, 4);
 
     // Confirm OK Button
-    auto okNormal = Sprite::createWithSpriteFrameName("yes_btn1.png");
-    auto okSelect = Sprite::createWithSpriteFrameName("yes_btn2.png");
-    auto okLabel = makeBMFont("OK", Fonts::White, 0.42f);
-    okLabel->setPosition(Vec2(okNormal->getContentSize().width / 2, okNormal->getContentSize().height / 2));
-    okNormal->addChild(okLabel);
-
-    auto okBtn = MenuItemSprite::create(okNormal, okSelect, this, menu_selector(NetworkLobbyLayer::onConfirmHeroSelect));
+    auto okBtn = makeButton("OK", CCSize(75, 28), this, menu_selector(NetworkLobbyLayer::onConfirmHeroSelect), 0.55f);
     okBtn->setPosition(Vec2(previewCenterX, 42));
 
     auto confirmMenu = Menu::create(okBtn, nullptr);

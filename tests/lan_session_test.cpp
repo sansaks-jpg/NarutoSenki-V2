@@ -180,6 +180,71 @@ int main()
 
     host.stop();
     client.stop();
+
+    // Test N1: Disconnect & Rejoin verification
+    {
+        LanSession hostSession;
+        LanSession client1;
+        LanSession client2;
+        std::string err;
+        assert(hostSession.host("Rejoin Room", "Host", 29877, &err));
+        assert(client1.join("127.0.0.1", 29877, "Client1", &err));
+
+        waitFor(hostSession, client1, [&]() {
+            return hostSession.state() == SessionState::Lobby && client1.state() == SessionState::Lobby &&
+                   hostSession.remoteConnected() && client1.remoteConnected();
+        }, 1000);
+
+        assert(client1.setLocalHero("Sasuke"));
+        waitFor(hostSession, client1, [&]() {
+            return hostSession.matchConfig().slots.size() >= 2 &&
+                   hostSession.matchConfig().slots[1].heroName == "Sasuke";
+        }, 1000);
+
+        // Client 1 leaves room
+        client1.stop();
+        waitFor(hostSession, client1, [&]() {
+            return hostSession.state() == SessionState::Hosting && !hostSession.remoteConnected();
+        }, 1000);
+
+        // Verify slot 1 is properly reset and not corrupted
+        assert(hostSession.matchConfig().slots.size() >= 2);
+        assert(hostSession.matchConfig().slots[1].playerName.empty());
+        assert(hostSession.matchConfig().slots[1].heroName.empty());
+
+        // Client 2 joins the same host session
+        assert(client2.join("127.0.0.1", 29877, "Client2", &err));
+        waitFor(hostSession, client2, [&]() {
+            return hostSession.state() == SessionState::Lobby && client2.state() == SessionState::Lobby &&
+                   hostSession.remoteConnected() && client2.remoteConnected() &&
+                   hostSession.matchConfig().slots[1].playerName == "Client2";
+        }, 1000);
+
+        // Client 2 picks hero and readies up
+        assert(client2.setLocalHero("Kakashi"));
+        assert(client2.setLocalReady(true));
+        assert(hostSession.setLocalReady(true));
+        waitFor(hostSession, client2, [&]() {
+            return hostSession.matchConfig().slots[1].heroName == "Kakashi" &&
+                   hostSession.matchConfig().slots[0].ready && hostSession.matchConfig().slots[1].ready;
+        }, 1000);
+
+        // Host starts match with Client 2
+        assert(hostSession.startMatch(&err));
+        waitFor(hostSession, client2, [&]() {
+            return hostSession.state() == SessionState::Loading && client2.state() == SessionState::Loading;
+        }, 1000);
+
+        assert(hostSession.markLoaded(&err));
+        assert(client2.markLoaded(&err));
+        waitFor(hostSession, client2, [&]() {
+            return hostSession.state() == SessionState::Battle && client2.state() == SessionState::Battle;
+        }, 1000);
+
+        hostSession.stop();
+        client2.stop();
+    }
+
     std::cout << "lan_session_test: ok\n";
     return 0;
 }

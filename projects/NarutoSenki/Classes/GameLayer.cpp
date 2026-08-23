@@ -700,9 +700,7 @@ void GameLayer::updateNetworkBattle(float dt)
 	{
 		std::vector<SessionNotice> notices;
 		session.drainNotices(notices);
-		std::string noticeText = notices.empty() ? "Opponent disconnected." : notices.back().text;
-		KTools::showNotice(noticeText.c_str(), 2.0f);
-		onGameOver();
+		onGameOver(true);
 		return;
 	}
 
@@ -805,11 +803,15 @@ void GameLayer::applyNetworkSnapshot(const nsv2::network::StateSnapshot &snapsho
 		if (state.slot == _networkLocalSlot)
 		{
 			// Host authoritative health and chakra synchronization
-			if (character->getHP() != state.hp)
+			// Only apply HP snapshot if local character is not dead or in knockdown to preserve local death/reborn transitions
+			if (character->getState() != State::DEAD && character->getState() != State::KNOCKDOWN)
 			{
-				character->setHP(state.hp);
-				if (getHudLayer() && getHudLayer()->status_hpbar)
-					setHPLose(character->getHpPercent());
+				if (character->getHP() != state.hp)
+				{
+					character->setHP(state.hp);
+					if (getHudLayer() && getHudLayer()->status_hpbar)
+						setHPLose(character->getHpPercent());
+				}
 			}
 			character->setCKR(state.ckr);
 			continue;

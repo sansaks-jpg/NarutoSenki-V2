@@ -427,7 +427,15 @@ void LanSession::handleMessage(const TransportEvent &event)
         _remotePort = event.port;
         _remotePlayerName = name;
         _remoteConnected = true;
+        if (_config.slots.size() < 2)
+        {
+            _config.slots.resize(2);
+            _config.slots[1].slot = 1;
+            _config.slots[1].group = GroupId::Akatsuki;
+        }
         _config.slots[1].playerName = name;
+        _config.slots[1].remote = true;
+        _config.slots[1].ready = false;
 
         Message accept;
         accept.type = MessageType::JoinAccept;
@@ -498,7 +506,7 @@ void LanSession::handleMessage(const TransportEvent &event)
 
     if (_role == SessionRole::Host && message.type == MessageType::Ready && _remoteConnected)
     {
-        if (message.payload.size() != 1 || message.payload[0] > 1)
+        if (message.payload.size() != 1 || message.payload[0] > 1 || _config.slots.size() < 2)
             return;
         _config.slots[1].ready = message.payload[0] != 0;
         sendLobbyUpdate();
@@ -564,7 +572,10 @@ void LanSession::handleMessage(const TransportEvent &event)
             _remoteLoaded = false;
             if (_role == SessionRole::Host)
             {
-                _config.slots.resize(1);
+                if (_config.slots.size() >= 2)
+                {
+                    _config.slots[1] = {1, GroupId::Akatsuki, false, true, "", ""};
+                }
                 setState(SessionState::Hosting, "Pemain keluar dari room.");
             }
             else
@@ -594,14 +605,15 @@ void LanSession::poll()
     if (!networkActive())
         return;
 
-    const uint64_t currentMs = nowMs();
     std::vector<TransportEvent> events;
     _transport.poll(events);
     handleTransportEvents(events);
     std::vector<RoomAdvertisement> ignoredRooms;
     _discovery.poll(ignoredRooms);
 
-    if (_remoteConnected && (currentMs - _lastHeartbeatMs) >= 1000)
+    const uint64_t currentMs = nowMs();
+
+    if (_remoteConnected && currentMs >= _lastHeartbeatMs && (currentMs - _lastHeartbeatMs >= 1000))
     {
         Message heartbeat;
         heartbeat.type = MessageType::Heartbeat;
@@ -614,7 +626,7 @@ void LanSession::poll()
     if (_state == SessionState::Connecting)
     {
         // Retransmit Hello handshake every 600ms (Fix C6)
-        if (currentMs - _lastHelloSendMs >= 600)
+        if (currentMs >= _lastHelloSendMs && (currentMs - _lastHelloSendMs >= 600))
         {
             Message hello;
             hello.type = MessageType::Hello;
@@ -624,7 +636,7 @@ void LanSession::poll()
             _transport.send(hello, _remoteAddress, _remotePort, &ignored);
             _lastHelloSendMs = currentMs;
         }
-        if (currentMs - _sessionStartedMs >= 6000)
+        if (currentMs >= _sessionStartedMs && (currentMs - _sessionStartedMs >= 6000))
         {
             _transport.stop();
             setState(SessionState::Error, "Timeout handshake: host tidak merespons.");
@@ -633,10 +645,13 @@ void LanSession::poll()
     else if (_state == SessionState::Lobby && _remoteConnected && _role == SessionRole::Host)
     {
         // Lobby heartbeat timeout (10s) to clean up ghost players (Fix H3)
-        if (_lastReceiveMs > 0 && (currentMs - _lastReceiveMs >= 10000))
+        if (_lastReceiveMs > 0 && currentMs >= _lastReceiveMs && (currentMs - _lastReceiveMs >= 10000))
         {
             _remoteConnected = false;
-            _config.slots.resize(1);
+            if (_config.slots.size() >= 2)
+            {
+                _config.slots[1] = {1, GroupId::Akatsuki, false, true, "", ""};
+            }
             setState(SessionState::Hosting, "Client terputus.");
             sendLobbyUpdate();
         }
@@ -644,7 +659,7 @@ void LanSession::poll()
     else if (_state == SessionState::Battle && _remoteConnected)
     {
         // Battle disconnect timeout (6s after first packet is received) (Fix C5)
-        if (_lastReceiveMs > 0 && (currentMs - _lastReceiveMs >= 6000))
+        if (_lastReceiveMs > 0 && currentMs >= _lastReceiveMs && (currentMs - _lastReceiveMs >= 6000))
         {
             _transport.stop();
             _remoteConnected = false;

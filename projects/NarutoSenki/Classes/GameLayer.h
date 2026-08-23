@@ -157,6 +157,8 @@ public:
 	bool _gameOverShown;
 
 	bool _enableGear;
+	bool _networkBattle = false;
+	bool isNetworkBattle() const { return _networkBattle; }
 
 	bool _isOugis2Game;
 	bool _isHardCoreGame;
@@ -210,7 +212,6 @@ private:
 
 	bool isHUDInitialized = false;
 	bool is4V4Mode = false;
-	bool _networkBattle = false;
 	uint8_t _networkLocalSlot = 0;
 	uint32_t _networkTick = 0;
 	float _networkAccumulator = 0.0f;

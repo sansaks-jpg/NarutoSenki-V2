@@ -15,9 +15,9 @@
 #else
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include <ifaddrs.h>
 #include <net/if.h>
 #include <netinet/in.h>
+#include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -301,31 +301,45 @@ std::vector<std::string> LanTransport::getBroadcastAddresses()
         }
     }
 #else
-    struct ifaddrs *ifaddr = nullptr;
-    if (getifaddrs(&ifaddr) != -1)
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock >= 0)
     {
-        for (struct ifaddrs *ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next)
+        char buffer[1024] = {};
+        ifconf ifc{};
+        ifc.ifc_len = sizeof(buffer);
+        ifc.ifc_buf = buffer;
+
+        if (ioctl(sock, SIOCGIFCONF, &ifc) == 0)
         {
-            if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET)
-                continue;
-            if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK) != 0)
-                continue;
-            if (ifa->ifa_flags & IFF_BROADCAST)
+            const ifreq *ifr = ifc.ifc_req;
+            const int count = ifc.ifc_len / sizeof(ifreq);
+            for (int i = 0; i < count; ++i)
             {
-                if (ifa->ifa_broadaddr && ifa->ifa_broadaddr->sa_family == AF_INET)
+                ifreq item = ifr[i];
+                if (ioctl(sock, SIOCGIFFLAGS, &item) == 0)
                 {
-                    char buf[INET_ADDRSTRLEN] = {};
-                    auto *sin = reinterpret_cast<struct sockaddr_in *>(ifa->ifa_broadaddr);
-                    if (inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf)))
+                    if ((item.ifr_flags & IFF_UP) && !(item.ifr_flags & IFF_LOOPBACK))
                     {
-                        std::string addrStr(buf);
-                        if (std::find(targets.begin(), targets.end(), addrStr) == targets.end())
-                            targets.push_back(addrStr);
+                        ifreq bcastReq = ifr[i];
+                        if (ioctl(sock, SIOCGIFBRDADDR, &bcastReq) == 0)
+                        {
+                            auto *sin = reinterpret_cast<sockaddr_in *>(&bcastReq.ifr_broadaddr);
+                            char ipBuf[INET_ADDRSTRLEN] = {};
+                            if (inet_ntop(AF_INET, &sin->sin_addr, ipBuf, sizeof(ipBuf)))
+                            {
+                                std::string addrStr(ipBuf);
+                                if (!addrStr.empty() && addrStr != "0.0.0.0" &&
+                                    std::find(targets.begin(), targets.end(), addrStr) == targets.end())
+                                {
+                                    targets.push_back(addrStr);
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
-        freeifaddrs(ifaddr);
+        close(sock);
     }
 #endif
     static const char *fallbackSubnets[] = {"192.168.43.255", "192.168.1.255", "192.168.0.255", "10.0.2.255"};
@@ -361,28 +375,41 @@ std::string LanTransport::getLocalIpAddress()
         }
     }
 #else
-    struct ifaddrs *ifaddr = nullptr;
-    if (getifaddrs(&ifaddr) != -1)
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock >= 0)
     {
-        for (struct ifaddrs *ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next)
+        char buffer[1024] = {};
+        ifconf ifc{};
+        ifc.ifc_len = sizeof(buffer);
+        ifc.ifc_buf = buffer;
+
+        if (ioctl(sock, SIOCGIFCONF, &ifc) == 0)
         {
-            if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET)
-                continue;
-            if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK) != 0)
-                continue;
-            char buf[INET_ADDRSTRLEN] = {};
-            auto *sin = reinterpret_cast<struct sockaddr_in *>(ifa->ifa_addr);
-            if (inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf)))
+            const ifreq *ifr = ifc.ifc_req;
+            const int count = ifc.ifc_len / sizeof(ifreq);
+            for (int i = 0; i < count; ++i)
             {
-                std::string ipStr(buf);
-                if (ipStr != "127.0.0.1" && !ipStr.empty())
+                ifreq item = ifr[i];
+                if (ioctl(sock, SIOCGIFFLAGS, &item) == 0)
                 {
-                    freeifaddrs(ifaddr);
-                    return ipStr;
+                    if ((item.ifr_flags & IFF_UP) && !(item.ifr_flags & IFF_LOOPBACK))
+                    {
+                        auto *sin = reinterpret_cast<sockaddr_in *>(&item.ifr_addr);
+                        char ipBuf[INET_ADDRSTRLEN] = {};
+                        if (inet_ntop(AF_INET, &sin->sin_addr, ipBuf, sizeof(ipBuf)))
+                        {
+                            std::string ipStr(ipBuf);
+                            if (ipStr != "127.0.0.1" && !ipStr.empty() && ipStr != "0.0.0.0")
+                            {
+                                close(sock);
+                                return ipStr;
+                            }
+                        }
+                    }
                 }
             }
         }
-        freeifaddrs(ifaddr);
+        close(sock);
     }
 #endif
     return "127.0.0.1";

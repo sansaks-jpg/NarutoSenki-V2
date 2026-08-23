@@ -1,0 +1,5 @@
+.externalNativeBuild
+release/
+debug/
+/build
+/jniLibs

@@ -1,0 +1,131 @@
+name: Build and Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to create; leave empty for build-only'
+        required: false
+        type: string
+      create_release:
+        description: 'Publish the APK as a GitHub Release'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build-release-apk:
+    name: Build release APK
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+          cache: gradle
+
+      - name: Install legacy NDK runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libtinfo5
+
+      - name: Cache Android NDK r17c
+        id: cache-ndk
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/android-ndk-r17c
+          key: ndk-r17c-linux-x86_64
+
+      - name: Download Android NDK r17c
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          echo "Downloading Android NDK r17c..."
+          curl -sSLo /tmp/android-ndk-r17c.zip https://dl.google.com/android/repository/android-ndk-r17c-linux-x86_64.zip
+          echo "Extracting Android NDK r17c..."
+          sudo unzip -q /tmp/android-ndk-r17c.zip -d /usr/local
+          sudo chown -R $USER:$USER /usr/local/android-ndk-r17c
+          rm -f /tmp/android-ndk-r17c.zip
+
+      - name: Configure Android SDK & NDK
+        shell: bash
+        run: |
+          echo "ANDROID_NDK_HOME=/usr/local/android-ndk-r17c" >> "$GITHUB_ENV"
+          echo "NDK_ROOT=/usr/local/android-ndk-r17c" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK=/usr/local/android-ndk-r17c" >> "$GITHUB_ENV"
+          
+          # Tulis local.properties agar Gradle mengenali lokasi SDK dan NDK
+          cat <<EOF > projects/NarutoSenki/proj.android-studio/local.properties
+          sdk.dir=${ANDROID_SDK_ROOT:-$ANDROID_HOME}
+          ndk.dir=/usr/local/android-ndk-r17c
+          EOF
+
+      - name: Build release APK
+        working-directory: projects/NarutoSenki/proj.android-studio
+        run: |
+          chmod +x ./gradlew
+          # Pastikan compiler Clang digunakan karena Application.mk menggunakan C++20 (-std=c++2a)
+          sed -i 's/NDK_TOOLCHAIN_VERSION=4.9/NDK_TOOLCHAIN_VERSION=clang/g' app/build.gradle
+          ./gradlew --no-daemon --stacktrace assembleRelease
+
+      - name: Prepare APK asset and checksum
+        id: apk
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_apk="$(find projects/NarutoSenki/proj.android-studio -type f -name '*.apk' | grep -i 'release' | head -n 1)"
+          if [[ -z "${source_apk}" ]]; then
+            echo "Error: No release APK found in build outputs!"
+            find projects/NarutoSenki/proj.android-studio -type f -name '*.apk'
+            exit 1
+          fi
+          echo "Found release APK: ${source_apk}"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            release_tag="${GITHUB_REF_NAME}"
+          elif [[ -n "${{ inputs.release_tag }}" ]]; then
+            release_tag="${{ inputs.release_tag }}"
+          else
+            release_tag="build-${GITHUB_RUN_NUMBER}"
+          fi
+          asset="NarutoSenki-${release_tag}.apk"
+          cp "${source_apk}" "${GITHUB_WORKSPACE}/${asset}"
+          sha256sum "${GITHUB_WORKSPACE}/${asset}" | tee "${GITHUB_WORKSPACE}/${asset}.sha256"
+          echo "path=${GITHUB_WORKSPACE}/${asset}" >> "${GITHUB_OUTPUT}"
+          echo "checksum_path=${GITHUB_WORKSPACE}/${asset}.sha256" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NarutoSenki-${{ steps.apk.outputs.release_tag }}
+          path: |
+            ${{ steps.apk.outputs.path }}
+            ${{ steps.apk.outputs.checksum_path }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.create_release == true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.apk.outputs.release_tag }}
+          name: NarutoSenki ${{ steps.apk.outputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.apk.outputs.path }}
+            ${{ steps.apk.outputs.checksum_path }}

@@ -37,6 +37,9 @@ public:
     void onStart(Ref *sender);
     void onLeave(Ref *sender);
 
+    void editBoxEditingDidBegin(cocos2d::extension::CCEditBox *editBox) override;
+    void editBoxEditingDidEnd(cocos2d::extension::CCEditBox *editBox) override;
+    void editBoxTextChanged(cocos2d::extension::CCEditBox *editBox, const std::string &text) override;
     void editBoxReturn(cocos2d::extension::CCEditBox *editBox) override;
 
     CREATE_FUNC(NetworkLobbyLayer);
@@ -50,6 +53,7 @@ private:
     void renderHostPage();
     void renderJoinPage();
     void renderHeroSelectPage();
+    void updateRoomListUI();
     void enterNetworkBattle();
     void setMessage(const std::string &message);
     std::string selectedAddress() const;
@@ -63,6 +67,7 @@ private:
     std::string _savedIpText = "127.0.0.1:28765";
     nsv2::network::SessionState _lastSessionState = nsv2::network::SessionState::Idle;
     cocos2d::extension::CCEditBox *_ipEditBox = nullptr;
+    Node *_roomListContainer = nullptr;
     CCLabelTTF *_statusLabel = nullptr;
     int _frameCounter = 0;
     bool _battleEntered = false;

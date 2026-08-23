@@ -187,9 +187,16 @@ void NetworkLobbyLayer::renderHeader()
 
 void NetworkLobbyLayer::renderPage()
 {
-    removeAllChildrenWithCleanup(true);
-    _ipEditBox = nullptr;
+    if (_ipEditBox)
+    {
+        if (_ipEditBox->getText())
+            _savedIpText = _ipEditBox->getText();
+        _ipEditBox->setDelegate(nullptr);
+        _ipEditBox = nullptr;
+    }
+    _roomListContainer = nullptr;
     _statusLabel = nullptr;
+    removeAllChildrenWithCleanup(true);
     renderHeader();
 
     if (_page == Page::Home)
@@ -300,18 +307,30 @@ void NetworkLobbyLayer::renderJoinPage()
     refreshBtn->setPosition(Vec2(winSize.width / 2 + 135, winSize.height / 2 + 40));
     addChild(actionMenu, 5);
 
+    _roomListContainer = Node::create();
+    _roomListContainer->setPosition(Vec2(0, 0));
+    addChild(_roomListContainer, 5);
+    updateRoomListUI();
+}
+
+void NetworkLobbyLayer::updateRoomListUI()
+{
+    if (!_roomListContainer)
+        return;
+    _roomListContainer->removeAllChildrenWithCleanup(true);
+
     float roomY = winSize.height / 2 - 5;
     if (_rooms.empty())
     {
         auto empty = CCLabelTTF::create("Searching for rooms on network... (Host must create room first)", FONT_NAME, 11);
         empty->setPosition(Vec2(winSize.width / 2, roomY - 15));
-        addChild(empty, 4);
+        _roomListContainer->addChild(empty, 4);
     }
     else
     {
         auto roomMenu = Menu::create();
         roomMenu->setPosition(Vec2(0, 0));
-        addChild(roomMenu, 5);
+        _roomListContainer->addChild(roomMenu, 5);
         for (size_t i = 0; i < _rooms.size() && i < 3; ++i)
         {
             const auto &room = _rooms[i];
@@ -655,11 +674,9 @@ void NetworkLobbyLayer::update(float dt)
             fingerprint << room.address << ':' << room.port << ':' << room.roomId << ';';
         if (fingerprint.str() != _roomsFingerprint)
         {
-            if (_ipEditBox && _ipEditBox->getText())
-                _savedIpText = _ipEditBox->getText();
             _rooms = std::move(rooms);
             _roomsFingerprint = fingerprint.str();
-            renderPage();
+            updateRoomListUI();
         }
     }
 }
@@ -894,9 +911,30 @@ void NetworkLobbyLayer::onLeave(Ref *sender)
     renderPage();
 }
 
+void NetworkLobbyLayer::editBoxEditingDidBegin(CCEditBox *editBox)
+{
+    (void)editBox;
+}
+
+void NetworkLobbyLayer::editBoxEditingDidEnd(CCEditBox *editBox)
+{
+    if (editBox && editBox == _ipEditBox && editBox->getText())
+        _savedIpText = editBox->getText();
+}
+
+void NetworkLobbyLayer::editBoxTextChanged(CCEditBox *editBox, const std::string &text)
+{
+    (void)editBox;
+    _savedIpText = text;
+}
+
 void NetworkLobbyLayer::editBoxReturn(CCEditBox *editBox)
 {
-    if (editBox == _ipEditBox)
+    if (editBox && editBox == _ipEditBox)
+    {
+        if (editBox->getText())
+            _savedIpText = editBox->getText();
         onJoinManual(nullptr);
+    }
 }
 

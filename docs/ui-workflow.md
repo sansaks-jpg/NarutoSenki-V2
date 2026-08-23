@@ -22,11 +22,15 @@ GameScene.lua
                                           -> StartMenu.lua
       -> Network / menu01
           -> NetworkLobbyLayer C++
-              -> Network Home
-                  -> HOST ROOM -> Host lobby
-                  -> JOIN ROOM -> Join discovery/manual IP
-              -> Back -> StartMenu
-              -> lobby ready/loading -> LoadLayer -> GameLayer LAN
+              -> Role Home (HOST / JOIN)
+                  -> HOST -> Lobby 1v1 (POV Mirroring)
+                  -> JOIN -> Discovery scanner & manual IP input
+              -> CHANGE HERO -> SelectLayer Grid (35 hero avatars)
+                  -> 1x tap -> preview half-portrait & Kanji logo
+                  -> 2x tap (double-click) / tap OK -> commit & return to Lobby
+              -> READY -> START MATCH (Host only when both ready)
+              -> LoadLayer -> GameLayer LAN Battle (Full Sync)
+              -> GameOver / Leave / Disconnect -> StartMenu
       -> Credits
           -> CreditsLayer
               -> Return

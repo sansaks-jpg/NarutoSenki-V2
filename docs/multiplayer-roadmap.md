@@ -55,7 +55,9 @@ Projectile, summon, AI kompleks, damage event detail, tower/flog, gear interacti
 | Selesai | Offline protocol | Serializer/frame validation dengan batas payload dan rejection untuk data invalid. |
 | Selesai | Local loopback | Host/client dua session dalam satu process dengan handshake, lobby, ready, loading, input, snapshot, dan cleanup. |
 | Selesai | LAN lobby prototype | Host room, UDP broadcast discovery, manual IP fallback, Join, Back/Leave, dan timeout. |
-| Selesai terbatas | Playable LAN 1v1 | Fixed tick, roster terbatas, host-authoritative input/snapshot bridge, serta APK release untuk branch fitur. |
+| Selesai | Full Roster & POV Mirroring | Integrasi layar pilih hero 35 karakter (`SelectLayer` avatar grid), double-click & tombol OK, dan POV simetris (1P selalu di kiri). |
+| Selesai | Battle Action & Skill Sync | Sinkronisasi penuh pergerakan analog + jurus (`SKILL1..3`, `OUGIS1..2`, `Item1`), pengurangan chakra, partikel jurus, dan suara. |
+| Selesai | Automated Release APK | GitHub Actions CI/CD otomatis mengompilasi APK rilis Android NDK r17c (`v2.2.0-multiplayer`). |
 | Berikutnya | Simulation hardening | Memisahkan state simulation dari rendering dan memperluas validasi damage, cooldown, projectile, summon, tower, gear, reborn, dan win condition. |
 | Berikutnya | Team LAN | Mendukung 3v3/4v4, roster lock, COM replacement, group state, dan bandwidth budget. |
 | Berikutnya | Resync/reconnect | Snapshot ring buffer, match token, last acknowledged tick/hash, full resync, dan reconnect yang eksplisit. |

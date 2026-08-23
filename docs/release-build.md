@@ -13,6 +13,7 @@ Release yang sudah dibuat untuk fitur LAN adalah:
 | [`v2.1.0-lan-mvp`](https://github.com/sansaks-jpg/NarutoSenki-V2/releases/tag/v2.1.0-lan-mvp) | `2241721` | LAN MVP dan perbaikan Android NDK `LOCAL_PATH`. |
 | [`v2.1.1-lan-hotfix`](https://github.com/sansaks-jpg/NarutoSenki-V2/releases/tag/v2.1.1-lan-hotfix) | `7a68897` | Perbaikan Back Network, GameOver, dan beban idle worker. |
 | [`v2.1.2-lan-optin`](https://github.com/sansaks-jpg/NarutoSenki-V2/releases/tag/v2.1.2-lan-optin) | `f5117d7` | LAN hanya aktif setelah Host/Join; offline tidak melakukan polling LAN. |
+| [`v2.2.0-multiplayer`](https://github.com/sansaks-jpg/NarutoSenki-V2/releases/tag/v2.2.0-multiplayer) | `42997d7` | Fitur penuh LAN 1v1: POV Mirroring simetris, integrasi layar pilih hero 35 karakter (`SelectLayer` grid avatar dengan double-click & tombol OK), sinkronisasi penuh jurus pertempuran (`SKILL1..3`, `OUGIS1..2`, `Item1`), dan workflow rilis otomatis. |
 
 ## Menjalankan workflow secara manual
 

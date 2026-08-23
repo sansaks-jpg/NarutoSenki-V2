@@ -25,8 +25,18 @@ void waitFor(LanSession &host, LanSession &client, const std::function<bool()> &
 }
 }
 
+void testOfflineDoesNotOpenSocket()
+{
+    LanSession offline;
+    assert(offline.state() == SessionState::Idle);
+    assert(!offline.networkActive());
+    offline.poll();
+    assert(!offline.networkActive());
+}
+
 int main()
 {
+    testOfflineDoesNotOpenSocket();
     LanSession host;
     LanSession client;
     std::string error;
@@ -73,6 +83,38 @@ int main()
         host.drainInputCommands(commands);
         return !commands.empty() && commands.front().playerSlot == 1;
     }, 1000);
+
+    InputCommand ordered;
+    ordered.sequence = 50;
+    ordered.tick = 3;
+    ordered.action = ActionType::Move;
+    ordered.axisX = 500;
+    assert(client.submitInput(ordered, &error));
+    std::vector<InputCommand> accepted;
+    for (int i = 0; i < 200 && accepted.empty(); ++i)
+    {
+        client.poll();
+        host.poll();
+        host.drainInputCommands(accepted);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    assert(accepted.size() == 1);
+    assert(accepted.front().sequence == 50);
+
+    InputCommand outOfOrder = ordered;
+    outOfOrder.sequence = 49;
+    outOfOrder.tick = 4;
+    outOfOrder.axisX = -500;
+    assert(client.submitInput(outOfOrder, &error));
+    for (int i = 0; i < 20; ++i)
+    {
+        client.poll();
+        host.poll();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    std::vector<InputCommand> rejected;
+    host.drainInputCommands(rejected);
+    assert(rejected.empty());
 
     StateSnapshot snapshot;
     snapshot.matchId = host.matchConfig().matchId;

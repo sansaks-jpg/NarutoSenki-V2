@@ -106,6 +106,58 @@ void testInputRoundTrip()
     assert(decoded.axisY == source.axisY);
 }
 
+void testRejectsOversizedPayload()
+{
+    Message source;
+    source.type = MessageType::Hello;
+    source.payload.assign(kMaxPayloadBytes + 1, 0xAB);
+    std::vector<uint8_t> bytes;
+    std::string error;
+    assert(!encodeMessage(source, bytes, &error));
+    assert(error == "payload exceeds protocol limit");
+
+    bytes.assign(20 + kMaxPayloadBytes + 1, 0);
+    bytes[0] = 0x4E;
+    bytes[1] = 0x53;
+    bytes[2] = 0x56;
+    bytes[3] = 0x32;
+    bytes[4] = static_cast<uint8_t>(kProtocolVersion & 0xFF);
+    bytes[5] = static_cast<uint8_t>(kProtocolVersion >> 8);
+    bytes[6] = static_cast<uint8_t>(MessageType::Hello);
+    bytes[8] = static_cast<uint8_t>((kMaxPayloadBytes + 1) & 0xFF);
+    bytes[9] = static_cast<uint8_t>((kMaxPayloadBytes + 1) >> 8);
+    bytes[10] = static_cast<uint8_t>((kMaxPayloadBytes + 1) >> 16);
+    bytes[11] = static_cast<uint8_t>((kMaxPayloadBytes + 1) >> 24);
+
+    Message decoded;
+    size_t consumed = 0;
+    assert(!decodeMessage(bytes.data(), bytes.size(), decoded, consumed, &error));
+    assert(error == "payload exceeds protocol limit");
+}
+
+void testRejectsUnknownTypeAndVersion()
+{
+    Message source;
+    source.type = MessageType::Hello;
+    source.payload = {1};
+    std::vector<uint8_t> bytes;
+    std::string error;
+    assert(encodeMessage(source, bytes, &error));
+
+    Message decoded;
+    size_t consumed = 0;
+    bytes[6] = 0xFF;
+    bytes[7] = 0xFF;
+    assert(!decodeMessage(bytes.data(), bytes.size(), decoded, consumed, &error));
+    assert(error == "unknown message type");
+
+    assert(encodeMessage(source, bytes, &error));
+    bytes[4] = 0xFF;
+    bytes[5] = 0xFF;
+    assert(!decodeMessage(bytes.data(), bytes.size(), decoded, consumed, &error));
+    assert(error == "unsupported protocol version");
+}
+
 void testRejectsMalformedFrames()
 {
     Message decoded;
@@ -131,6 +183,8 @@ int main()
     testMatchConfigRoundTrip();
     testInputRoundTrip();
     testSnapshotRoundTrip();
+    testRejectsOversizedPayload();
+    testRejectsUnknownTypeAndVersion();
     testRejectsMalformedFrames();
     std::cout << "lan_protocol_test: ok\n";
     return 0;

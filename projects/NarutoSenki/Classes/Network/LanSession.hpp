@@ -75,6 +75,10 @@ public:
     uint8_t localSlot() const { return _localSlot; }
     bool localReady() const { return _localReady; }
     bool remoteConnected() const { return _remoteConnected; }
+    bool networkActive() const
+    {
+        return _transport.isRunning() || _discovery.isAdvertising() || _discovery.isScanning();
+    }
     const std::string &remoteAddress() const { return _remoteAddress; }
     uint16_t remotePort() const { return _remotePort; }
 

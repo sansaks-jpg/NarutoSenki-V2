@@ -18,7 +18,7 @@ Dependency yang disebut dokumentasi legacy meliputi compiler C/C++, freetype, GL
 
 ## Android
 
-Project Android berada di `projects/NarutoSenki/proj.android-studio`. `app/build.gradle` menggunakan external native build dengan `ndk-build`. `app/jni/Android.mk` mendaftarkan source C++ dan menghubungkan Cocos2d-x, CocosDenshion, Lua, extensions, SQLite, serta library native.
+Project Android berada di `projects/NarutoSenki/proj.android-studio`. `app/build.gradle` menggunakan external native build dengan `ndk-build`. `app/jni/Android.mk` mendaftarkan source C++ game dan subsistem `Classes/Network`, lalu menghubungkan Cocos2d-x, CocosDenshion, Lua, extensions, SQLite, serta library native. `Android.mk` harus diawali `LOCAL_PATH := $(call my-dir)` agar path source lokal tidak salah di-resolve oleh NDK r17c.
 
 ABI yang dikonfigurasi pada `gradle.properties` adalah `armeabi-v7a` dan `arm64-v8a`. Task Gradle menyalin `../../lua` ke `app/assets/lua` dan `../../Resources` ke `app/assets` sebelum build. Jangan menjadikan folder hasil salinan sebagai source-of-truth.
 
@@ -27,7 +27,7 @@ cd projects/NarutoSenki/proj.android-studio
 ./gradlew assembleDebug
 ```
 
-Sebelum distribusi, verifikasi package/application id, version code/name, ABI, target SDK, permission final, dan signing. Jangan menggunakan signing password yang ter-commit; gunakan keystore lokal/CI secret yang baru.
+Sebelum distribusi, verifikasi package/application id, version code/name, ABI, target SDK, permission final, dan signing. Untuk build LAN, uji bahwa offline/Training tidak membuka socket, sedangkan Host/Join mengaktifkan UDP hanya setelah dipilih. Jangan menggunakan signing password yang ter-commit; gunakan keystore lokal/CI secret yang baru.
 
 ## Windows
 
@@ -60,6 +60,10 @@ iOS project lama berada di `projects/NarutoSenki/proj.ios`. Xcode project masih 
 | `projects/NarutoSenki/__BIN__` | Build output | Di-ignore oleh repository. |
 | `Debug.win32`, `Release*`, `obj`, `bin`, `gen` | Build/cache | Jangan commit. |
 | `proj.mac/build` | Xcode generated output | Hapus/abaikan bila tidak diperlukan untuk source. |
+
+## LAN dan permission Android
+
+Transport LAN MVP menggunakan IPv4 UDP native. Dengan `compileSdkVersion 31`, `targetSdkVersion 31`, dan `minSdkVersion 21`, branch ini belum menambahkan permission local-network khusus yang baru relevan pada target Android yang lebih tinggi. Jika target SDK dinaikkan, tinjau permission dan kebijakan local network sebelum raw UDP dipakai. Broadcast discovery dapat diblokir oleh AP isolation; manual `IP:port` harus dipertahankan sebagai fallback.
 
 ## Debugging build
 

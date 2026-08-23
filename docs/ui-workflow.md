@@ -20,6 +20,13 @@ GameScene.lua
                                   -> Pause / Gear / Action HUD
                                       -> GameOver
                                           -> StartMenu.lua
+      -> Network / menu01
+          -> NetworkLobbyLayer C++
+              -> Network Home
+                  -> HOST ROOM -> Host lobby
+                  -> JOIN ROOM -> Join discovery/manual IP
+              -> Back -> StartMenu
+              -> lobby ready/loading -> LoadLayer -> GameLayer LAN
       -> Credits
           -> CreditsLayer
               -> Return
@@ -35,7 +42,7 @@ GameScene.lua
 | UI | File/handler | Perilaku |
 |---|---|---|
 | Training / `menu02.png` | `MenuButtonType::Training` -> `StartMenu::onTrainingCallBack()` | Membuka `GameModeLayer`. Ini adalah jalur masuk utama untuk memulai match. |
-| Custom/network / `menu01.png` | `MenuButtonType::Custom` | Saat ini hanya memainkan suara/menampilkan pilihan; handler inti masih `TODO`, belum membuka online mode. |
+| Network / `menu01.png` | `MenuButtonType::Custom` -> `NetworkLobbyLayer` | Membuka Network Home. Belum ada socket atau polling ketika hanya halaman Home dibuka; pemain harus memilih Host atau Join untuk mengaktifkan LAN. |
 | Credits / `menu04.png` | `StartMenu::onCreditsCallBack()` | Membuka `CreditsLayer`. Di source item ini dibuat `visible=false`, tetapi dapat muncul melalui scroll state bila logika menu mengaktifkannya. |
 | Exit / `menu03.png` | `MenuButtonType::Exit` -> `onExitCallBack()` | Desktop memanggil `Director::end()` dan `exit(0)`. Android memakai jalur back yang saat ini sebagian besar dikomentari. |
 | News | `StartMenu::onNewsBtn()` | Tombol ada di pojok atas; implementasi Android/webview dikomentari, sehingga secara praktis tidak melakukan aksi. |
@@ -44,7 +51,7 @@ GameScene.lua
 
 Menu utama memiliki dialog konfirmasi Hardcore yang tersedia lewat `onHardLayerCallBack()`: tombol Yes menghapus dialog dan tombol No membatalkan dialog. Pada implementasi menu saat ini, item Hardcore tidak dibuat sebagai item utama yang aktif dalam daftar `menuArray`; mode Hardcore lebih jelas tersedia di `GameModeLayer`.
 
-## 2. Pemilihan mode
+## 3. Pemilihan mode
 
 `StartMenu::onTrainingCallBack()` membuat scene baru berisi `GameModeLayer`. `GameModeLayer::init()` membuat tombol mode dari `GameMode/1.png` sampai `GameMode/8.png`, memberi setiap tombol enum `GameMode`, lalu mengunci mode yang memiliki `isLocked=true` dengan mask rantai.
 
@@ -65,7 +72,7 @@ Perilaku `ModeMenuButton` penting: klik pertama pada mode memanggil `selectMode(
 
 Tombol return `UI/return_btn.png` selalu tersedia di layar mode dan memanggil `GameModeLayer::backToMenu()`, yang membuat ulang `StartMenu`.
 
-## 3. Character selection
+## 4. Character selection
 
 `lua/ui/StartMenu.lua::enterSelectLayer()` memuat sprite atlas Select/UI/Report/Ougis/Map/Gears, menyimpan `_G.mode` dan `_G.enableCustomSelect`, lalu membuat `SelectLayer`. `SelectLayer.lua` membangun tiga page karakter. Daftar karakter berasal dari `ns.CharactersLayout`; portrait disusun dalam grid tujuh kolom dan tiga row per page.
 
@@ -82,7 +89,7 @@ Tombol return `UI/return_btn.png` selalu tersedia di layar mode dan memanggil `G
 
 Mode `Clone` dan `OneVsOne` memaksa `enableCustomSelect=false`. Mode `Classic` dan `RandomDeathmatch` diperlakukan sebagai 3v3; `FourVsFour` dan `HardCore_4Vs4` diperlakukan sebagai 4v4. Karena itu, jumlah slot COM dan kapan selection dikunci tergantung mode.
 
-## 4. Skill screen
+## 5. Skill screen
 
 `SkillLayer.lua` dibuka dari tombol Skill di character selection. Layar ini menampilkan hero besar, rank berdasarkan win/bond record, coin, bond progress, best time, dan lima slot skill.
 
@@ -96,11 +103,11 @@ Mode `Clone` dan `OneVsOne` memaksa `enableCustomSelect=false`. Mode `Classic` d
 
 `SkillLayer` tidak memulai battle. Setelah kembali, tombol Start tetap berada di `SelectLayer`.
 
-## 5. Load dan masuk battle
+## 6. Load dan masuk battle
 
 Klik Start di `SelectLayer` menjalankan `onGameStart()`. Fungsi ini memanggil handler mode untuk membuat roster, memuat/preload audio, lalu mengganti scene ke `LoadLayer`. Setelah loading selesai, `GameLayer` dibangun. `GameLayer` membuat `HudLayer`, unit, tower, flog, map, dan battle runtime sesuai handler mode.
 
-## 6. Battle HUD yang dapat diklik
+## 7. Battle HUD yang dapat diklik
 
 `HudLayer::initHeroInterface()` membuat kontrol berbeda untuk mobile dan desktop. Elemen status seperti HP, CKR/EXP, coin, kill/death, skor group, dan game clock hanya display.
 
@@ -120,7 +127,7 @@ Klik Start di `SelectLayer` menjalankan `onGameStart()`. Fungsi ini memanggil ha
 
 `ActionButton` menerapkan hitbox touch, lock global, cooldown, double-click/ougi handling, freeze mask, progress mark, dan dispatch ke delegate `HudLayer`. Untuk menambah kontrol baru, jangan langsung mengubah `GameLayer` dari UI; tambahkan tipe command/ABType, buat button, hubungkan delegate, lalu implementasikan perilakunya di GameLayer.
 
-## 7. Gear/shop overlay
+## 8. Gear/shop overlay
 
 Klik avatar/gear membuka `GearLayer` sebagai scene overlay dengan screenshot battle di belakang dan blend gelap.
 
@@ -134,7 +141,7 @@ Klik avatar/gear membuka `GearLayer` sebagai scene overlay dengan screenshot bat
 
 Gear tertentu membuka item HUD tambahan: `Gear06` membuka item2, `Gear00` membuka item3, dan `Gear03` membuka item4.
 
-## 8. Pause overlay
+## 9. Pause overlay
 
 Klik ikon pause/minimap membuat `PauseLayer`. Battle di belakang dirender sebagai screenshot; effect dan background music dipause.
 
@@ -148,15 +155,15 @@ Klik ikon pause/minimap membuat `PauseLayer`. Battle di belakang dirender sebaga
 | Yes pada dialog surrender | Menandai `_isSurrender=true`, menutup pause scene, dan melanjutkan flow game over. |
 | No pada dialog surrender | Menutup dialog dan menampilkan kembali menu pause. |
 
-## 9. Game over dan kembali ke menu
+## 10. Game over dan kembali ke menu
 
 `GameOver` menampilkan report match, slain/death, hasil, reward/record, dan tombol close. Tombol upload masih dikomentari/tidak aktif. Tombol close memanggil `onBackToMenu()`, menjalankan cleanup mode dan callback Lua `onGameOver()`. `lua/ui/StartMenu.lua::onGameOver()` membuat ulang scene `StartMenu`.
 
-## 10. Titik modifikasi UI yang paling penting
+## 11. Titik modifikasi UI yang paling penting
 
 Untuk mengubah label, sprite, atau susunan menu, mulai dari `projects/NarutoSenki/lua/ui` dan `Resources/UI`/atlas terkait. Untuk mengubah scene transition, periksa `StartMenu.cpp`, `GameModeLayer.cpp`, `SelectLayer.lua`, dan `lua/ui/StartMenu.lua`. Untuk menambah pilihan mode, ubah enum/data, implementasi handler, wiring `GameModeLayer`, serta resource `GameMode/*.png`. Untuk menambah tombol gameplay, periksa `HudLayer.cpp`, `ActionButton.cpp`, `HudLayer.h`, dan dispatch GameLayer.
 
-Untuk mode online, jalur menu yang saat ini paling cocok dijadikan entry point adalah `MenuButtonType::Custom`/`menu01.png`, karena handler-nya masih `TODO` dan suara `NETWORK_SOUND` sudah tersedia. Entry point itu dapat diarahkan ke lobby/room scene baru tanpa merusak workflow local training. Namun state battle tetap harus dipisahkan dari UI; UI hanya mengirim intent/command ke networking layer dan GameLayer.
+Untuk memperluas mode LAN, mulai dari `NetworkLobbyLayer`, `LanSession`, `LanProtocol`, dan bridge `GameLayer`. UI hanya mengirim intent Host/Join/ready/start; state authoritative tetap berada pada session dan GameLayer. Jangan mengaktifkan jaringan dari Training atau mode offline.
 
 ## Referensi
 

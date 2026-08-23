@@ -91,6 +91,8 @@
 - **移除**
   - 所有网络相关的代码 & 依赖 (websocket)
   - [Config] 注释了 `Hidan` & `Kakuzu` & `Chiyo` 的hurt音效配置
+
+> 历史说明：上面的网络代码移除记录描述的是旧版 upstream 基线。分支 `feature/lan-hotspot-multiplayer` 在 `projects/NarutoSenki/Classes/Network` 中加入了独立的 LAN/热点 1v1 MVP；详情请参阅 [`../docs/lan-multiplayer.md`](../docs/lan-multiplayer.md)。
 - **特点**
   - [Linux & Windows] 键盘支持 (只有在战斗场景才会完全支持)
 

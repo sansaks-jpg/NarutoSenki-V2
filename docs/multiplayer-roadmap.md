@@ -2,79 +2,87 @@
 
 ## Kondisi saat ini
 
-Source saat ini adalah local battle dengan AI/COM. Dokumentasi legacy menyebut kode dan dependency WebSocket pernah dihapus, sehingga tombol `Custom/network` di StartMenu belum menjadi lobby online. UI sudah memiliki titik masuk, tetapi belum ada session server, identity pemain, protocol, snapshot, authority, reconnect, atau anti-cheat.[1]
+Branch `feature/lan-hotspot-multiplayer` sudah memiliki MVP multiplayer **LAN/hotspot 1v1 host-authoritative**. Entry point-nya adalah `MenuButtonType::Custom` pada StartMenu, yang membuka `NetworkLobbyLayer`. Fitur ini bukan matchmaking internet dan tidak membutuhkan backend server.
 
-## Prinsip desain
+MVP menyediakan pembuatan room oleh host, discovery room melalui UDP broadcast, join melalui room yang ditemukan atau alamat manual `IP:port`, lobby dua slot, pilihan hero terbatas, ready/loading barrier, fixed tick, input command, state snapshot, heartbeat, timeout, leave, dan transisi ke battle. Host menjadi authority untuk menerima input remote dan mengirim snapshot. Detail implementasi dan prosedur uji berada di [lan-multiplayer.md](lan-multiplayer.md).
 
-Multiplayer jangan dimulai dari sinkronisasi sprite. Pisahkan **intent**, **simulation state**, dan **presentation**. Client mengirim input command; simulation authoritative menentukan hasil; HUD menampilkan state. Server sebaiknya authoritative untuk damage, cooldown, resource, spawn, death/reborn, gear, objective, dan win condition.
+Lifecycle LAN bersifat **opt-in**. Membuka StartMenu, memainkan Training/offline, atau hanya membuka Network Home tidak membuat socket, tidak menjalankan worker UDP, dan tidak melakukan polling LAN. Transport gameplay/discovery baru dimulai ketika pemain memilih `HOST ROOM` atau `JOIN ROOM`, kemudian dihentikan ketika Leave, Back, GameOver, timeout, atau scene keluar.
+
+## Prinsip desain yang sudah diterapkan
+
+Multiplayer dipisahkan menjadi **intent**, **simulation state**, dan **presentation**. Client mengirim `InputCommand`; host memvalidasi command, menjalankan sisi authoritative yang tersedia, lalu mengirim `StateSnapshot`. Client tidak mengirim posisi final, HP, damage, hasil serangan, atau status menang sebagai sumber kebenaran.
 
 ```text
-Client UI/Input
-  -> Command {matchId, playerId, tick, sequence, action, payload}
-      -> transport (WebSocket/TLS)
-          -> authoritative server
-              -> deterministic battle simulation
-                  -> validated event/state snapshot
-                      -> clients
-                          -> GameLayer / CharacterBase / HudLayer
+NetworkLobbyLayer / HUD input
+  -> LanSession
+      -> LanProtocol frame validation
+          -> LanTransport UDP
+              -> host/client session
+                  -> GameLayer command/snapshot bridge
+                      -> battle presentation
 ```
 
-## Entry point UI
+`LanTransport` memiliki worker native yang hanya menangani socket, encode/decode frame, dan queue event. Worker tidak boleh mengakses `Director`, `Node`, `Sprite`, scheduler, atau UI. `LanSession::poll()` menguras queue pada main thread melalui callback update. `LanNetworkRuntime::sharedLanSession()` mempertahankan session saat scene berubah dari lobby ke loading/battle.
 
-Gunakan `MenuButtonType::Custom` pada `menu01.png` sebagai entry point lobby. Handler saat ini masih `TODO`, sehingga dapat diarahkan ke scene `OnlineLobbyLayer` tanpa mengganggu Training/local flow. Lobby minimal membutuhkan create room, join room/code, ready, leave, connection status, dan error/timeout state.
+## Kontrak protocol LAN
 
-## Protocol minimum
-
-| Message | Dari | Isi minimum |
+| Message/kontrak | Arah | Fungsi MVP |
 |---|---|---|
-| `hello` | Client -> Server | Protocol version, build id, client nonce. |
-| `room_create` | Client -> Server | Requested mode, map, max players. |
-| `room_join` | Client -> Server | Room code/token. |
-| `ready` | Client -> Server | Player selection lock dan ready state. |
-| `match_start` | Server -> Client | Match id, roster, map, seed, tick rate. |
-| `input` | Client -> Server | Tick, sequence, action type, direction/target/payload. |
-| `snapshot` | Server -> Client | Tick, authoritative entities, state hash, events. |
-| `ack` | Server -> Client | Last processed input sequence/tick. |
-| `resync` | Client <-> Server | Snapshot penuh ketika hash berbeda. |
-| `leave`/`disconnect` | Either | Player state and reason. |
-| `match_end` | Server -> Client | Result, rewards, server summary/hash. |
+| `Hello` | Client -> Host | Memulai handshake dan mengirim nama player. |
+| `JoinAccept` | Host -> Client | Mengirim konfigurasi awal dan menerima client ke lobby. |
+| `LobbyUpdate` | Host -> Client | Menyebarkan roster, hero, ready state, map, seed, dan tick rate. |
+| `SelectHero` | Client -> Host | Mengirim pilihan hero client. |
+| `Ready` | Client -> Host | Mengubah ready state client. |
+| `MatchStart` | Host -> Client | Mengunci `MatchConfig` dan memulai loading. |
+| `Loaded`/`Ack` | Dua arah | Menyelesaikan loaded barrier sebelum battle. |
+| `Input` | Client -> Host | Mengirim intent dengan tick, slot, action, dan sequence. |
+| `Snapshot` | Host -> Client | Mengirim state authoritative yang tersedia. |
+| `Heartbeat` | Dua arah | Menjaga koneksi dan mendeteksi peer yang berhenti merespons. |
+| `Leave`/`Disconnect` | Dua arah | Mengakhiri session dengan cleanup eksplisit. |
 
-Gunakan schema version dan batas ukuran payload. Jangan serialisasi raw pointer atau class Cocos2d-x. ID entity, enum, dan action harus eksplisit serta stabil.
+Frame memiliki magic, protocol version, message type, payload length dengan batas `64 KiB`, sequence, tick, dan payload. Payload invalid, message type tidak dikenal, version mismatch, sequence out-of-order, slot invalid, action invalid, dan match id yang tidak sesuai tidak boleh masuk ke simulation.
 
-## Deterministic simulation
+## Deterministic simulation dan batas MVP
 
-Battle saat ini menggabungkan view dan simulation dalam `GameLayer`/`CharacterBase`. Refactor bertahap diperlukan: pertama ekstrak command dari joystick/action button; kedua buat state data yang dapat diserialisasi; ketiga pisahkan update simulation dari rendering; keempat beri tick tetap dan seed RNG; kelima tambahkan state hash dan replay test.
+`MatchConfig` menetapkan mode 1v1, map, seed, tick rate, jumlah pemain, gear/reborn, dan slot roster. `GameLayer::updateNetworkBattle()` menggunakan accumulator fixed-timestep; render tetap mengikuti frame rate perangkat. Implementasi saat ini adalah seam command/snapshot dan belum membuktikan determinisme penuh untuk semua efek gameplay.
 
-State yang perlu ditentukan secara eksplisit meliputi posisi/velocity, facing, state animation yang relevan untuk gameplay, HP/CKR/CKR2, cooldown, buff/debuff, target, projectile, summon, tower/flog, group, gear/item, death/reborn, timer, coin yang relevan, dan objective. Frame sprite/particle/audio tidak perlu dikirim sebagai state authoritative.
+Projectile, summon, AI kompleks, damage event detail, tower/flog, gear interaction, reborn, result replication, snapshot interpolation, dan resync penuh masih membutuhkan perluasan per hero serta pengujian perangkat. MVP tidak menjanjikan 3v3/4v4 LAN, semua hero, reconnect otomatis, spectator, replay, internet matchmaking, atau anti-cheat production-grade.
 
-## Tahapan implementasi
+## Milestone
 
-| Tahap | Hasil |
-|---|---|
-| 0. Offline protocol | Command/event interface dan serializer yang diuji tanpa network. |
-| 1. Local loopback | Dua client dalam satu process/host; input dipisahkan dari rendering. |
-| 2. Lobby prototype | Room create/join/ready dengan satu mode 1v1. |
-| 3. Server tick | Server menerima input, menjalankan tick, mengirim snapshot/event. |
-| 4. 1v1 playable | Satu map, roster terbatas, timeout, reconnect, result server. |
-| 5. Team mode | 3v3/4v4, COM replacement, roster lock, team state. |
-| 6. Hardening | TLS, authentication, rate limit, validation, replay, anti-desync, observability. |
+| Status | Milestone | Hasil |
+|---|---|---|
+| Selesai | Offline protocol | Serializer/frame validation dengan batas payload dan rejection untuk data invalid. |
+| Selesai | Local loopback | Host/client dua session dalam satu process dengan handshake, lobby, ready, loading, input, snapshot, dan cleanup. |
+| Selesai | LAN lobby prototype | Host room, UDP broadcast discovery, manual IP fallback, Join, Back/Leave, dan timeout. |
+| Selesai terbatas | Playable LAN 1v1 | Fixed tick, roster terbatas, host-authoritative input/snapshot bridge, serta APK release untuk branch fitur. |
+| Berikutnya | Simulation hardening | Memisahkan state simulation dari rendering dan memperluas validasi damage, cooldown, projectile, summon, tower, gear, reborn, dan win condition. |
+| Berikutnya | Team LAN | Mendukung 3v3/4v4, roster lock, COM replacement, group state, dan bandwidth budget. |
+| Berikutnya | Resync/reconnect | Snapshot ring buffer, match token, last acknowledged tick/hash, full resync, dan reconnect yang eksplisit. |
+| Masa depan | Internet service | Backend room/session, identity, authentication, TLS, rate limit, metrics, health check, dan deployment terpisah dari client. |
 
 ## Reconnect dan desync
 
-Server harus menyimpan ring buffer snapshot/event dan menerima reconnect dengan match token. Client mengirim last acknowledged tick/hash; server mengirim delta atau full snapshot. Jika state hash berbeda, jangan memperbaiki dengan posisi client; lakukan resync dan catat log. Timeout, duplicate sequence, out-of-order input, invalid action, dan client clock drift harus memiliki perilaku yang ditentukan.
+MVP saat ini mengakhiri match dengan state `Finished` ketika timeout atau disconnect; tidak ada reconnect diam-diam. Pengembangan berikutnya harus menyimpan ring buffer snapshot/event dan menerima reconnect dengan match token. Client mengirim last acknowledged tick/hash, kemudian host/server mengirim delta atau full snapshot. Posisi client tidak boleh dipakai untuk memperbaiki state authoritative.
 
-## Backend dan deployment
+State hash, duplicate sequence, invalid action, client clock drift, dan timeout harus memiliki perilaku yang terdokumentasi serta test deterministik. Reconnect tidak boleh memperpanjang lifetime socket ketika session sudah berada pada state `Finished`, `Error`, atau `Idle`.
 
-Pisahkan server multiplayer dari game client. Server tidak boleh menjalankan Cocos2d-x renderer atau menerima asset client sebagai executable code. Gunakan service kecil dengan storage room/session, logging, metrics, dan health check. Credential server hanya berada di environment/secret manager, bukan Lua, C++, resource, atau APK.
+## Backend dan deployment masa depan
+
+Jika multiplayer internet ditambahkan, backend harus dipisahkan dari renderer Cocos2d-x dan tidak boleh menerima asset client sebagai executable code. Service tersebut memerlukan storage room/session, logging, metrics, health check, authentication, TLS, rate limiting, dan secret management. Credential server tidak boleh berada di Lua, C++, resource, atau APK.
 
 ## Risiko teknis
 
-Refactor ini besar karena `CharacterBase`, `Hero`, `GameLayer`, `ActionButton`, `CommandSystem`, `SpawnSystem`, dan mode handler saat ini saling terhubung dengan global state, callback, timer, dan object lifecycle Cocos2d-x. Prototipe realistis dimulai dari 1v1, roster terbatas, fixed map, dan server-authoritative input; jangan langsung menargetkan semua hero/mode.
+Refactor lanjutan tetap berisiko karena `CharacterBase`, `Hero`, `GameLayer`, `ActionButton`, `CommandSystem`, `SpawnSystem`, dan mode handler saling terhubung dengan global state, callback, timer, dan lifecycle object Cocos2d-x. Setiap perluasan harus mempertahankan jalur offline, menghindari akses Cocos2d-x dari worker, dan memverifikasi cleanup setelah match selesai.
 
 ## Referensi
 
-[1]: ../Doc/README.md "Legacy note that network/WebSocket code was removed"
-[2]: ../projects/NarutoSenki/Classes/Systems/CommandSystem.hpp "Existing command abstraction"
-[3]: ../projects/NarutoSenki/Classes/GameLayer.cpp "Current battle orchestration"
-[4]: ../projects/NarutoSenki/Classes/HudLayer.cpp "Current HUD input dispatch"
-[5]: ../projects/NarutoSenki/Classes/GameMode/IGameModeHandler.hpp "Mode lifecycle and roster contract"
+[1]: lan-multiplayer.md "LAN Multiplayer MVP pada branch fitur"
+[2]: ../projects/NarutoSenki/Classes/Network/LanProtocol.hpp "LAN protocol types and limits"
+[3]: ../projects/NarutoSenki/Classes/Network/LanTransport.cpp "Native UDP transport worker"
+[4]: ../projects/NarutoSenki/Classes/Network/LanSession.cpp "Host/client session lifecycle"
+[5]: ../projects/NarutoSenki/Classes/GameLayer.cpp "Battle command and snapshot bridge"
+[6]: ../projects/NarutoSenki/Classes/GameMode/IGameModeHandler.hpp "Mode lifecycle and roster contract"
+[7]: ../.github/workflows/release-apk.yml "APK release workflow"
+
+Fakta pada dokumen ini diringkas dari source LAN dan battle pada branch `feature/lan-hotspot-multiplayer`, bukan dari kontrak backend yang belum diimplementasikan.

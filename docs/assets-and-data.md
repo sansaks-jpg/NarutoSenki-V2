@@ -48,7 +48,7 @@ Map dibuat/diedit dengan Tiled sesuai dokumentasi legacy. Data tile dan map haru
 
 ## Save dan local data
 
-`MyUtils/KTools.cpp` menggunakan SQLite3 untuk `GameRecord`, `CharRecord`, coin, win count, dan best time. Data save bersifat lokal; tidak ada account/backend yang menjadi sumber kebenaran. Perubahan schema/query harus backward-compatible atau memiliki migration yang jelas. Hindari menyusun query dari input jaringan tanpa binding/validasi bila multiplayer ditambahkan.
+`MyUtils/KTools.cpp` menggunakan SQLite3 untuk `GameRecord`, `CharRecord`, coin, win count, dan best time. Data save bersifat lokal; tidak ada account/backend yang menjadi sumber kebenaran. Perubahan schema/query harus backward-compatible atau memiliki migration yang jelas. Pada LAN MVP, `InputCommand` dan `StateSnapshot` hanya menjadi data runtime; jangan menulis input jaringan langsung ke query SQLite dan jangan menjadikan save lokal sebagai state authoritative match. Semua input jaringan harus melalui validasi protocol/session terlebih dahulu.
 
 ## Naming contract
 

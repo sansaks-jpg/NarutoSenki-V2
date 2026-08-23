@@ -1,40 +1,84 @@
 # LAN Multiplayer MVP
 
-## Status
+## Status dan ruang lingkup
 
-Branch ini menambahkan fondasi multiplayer LAN 1v1 host-authoritative. Tombol `Custom/Network` pada start menu membuka screen Network yang memiliki alur `Host Room`, `Join Room`, discovery room berbasis UDP broadcast, manual `IP:port`, lobby, pilihan hero, ready, loaded barrier, dan transisi ke pipeline battle.
+Branch `feature/lan-hotspot-multiplayer` menyediakan multiplayer **LAN/hotspot 1v1 host-authoritative**. Tombol `Network` pada StartMenu membuka `NetworkLobbyLayer`, lalu pemain dapat memilih `HOST ROOM` atau `JOIN ROOM`. Fitur ini ditujukan untuk dua perangkat pada jaringan lokal atau hotspot yang sama; fitur ini bukan internet matchmaking dan tidak memakai backend server.
 
-Mode offline existing tidak membuka socket dan tidak menjalankan polling LAN. Transport UDP, worker, discovery, dan `LanSession::poll()` baru aktif setelah pengguna memilih `HOST ROOM` atau `JOIN ROOM`; sekadar membuka halaman Network Home tetap ringan.
+Mode offline dan Training tetap terpisah dari LAN. Session, UDP socket, worker, discovery, dan polling baru diaktifkan setelah pemain memilih Host atau Join. Membuka Network Home saja tidak mengaktifkan jaringan. Setelah Leave, Back, GameOver, timeout, atau scene keluar, session harus dihentikan dan socket/worker harus dilepas.
 
-## Supported MVP
+## Alur pengguna
 
-MVP mendukung satu host dan satu client pada jaringan lokal atau hotspot yang sama. Host menggunakan UDP gameplay port `28765`; discovery menggunakan UDP port `28766`. Discovery hanya membantu menemukan room. Jika broadcast/multicast tidak tersedia karena konfigurasi hotspot atau AP isolation, client dapat memasukkan alamat host secara manual, misalnya `192.168.43.1:28765`.
+| Tahap | Host | Client |
+|---|---|---|
+| 1. Masuk Network | Membuka Network Home. | Membuka Network Home. |
+| 2. Aktifkan LAN | Memilih `HOST ROOM`; advertising discovery dan gameplay UDP dimulai. | Memilih `JOIN ROOM`; scanner discovery dimulai. |
+| 3. Temukan peer | Menunggu client pada room. | Memilih room hasil discovery atau memasukkan `IP:port` manual. |
+| 4. Lobby | Melihat slot, menerima hero client, menekan `READY`, lalu `START MATCH`. | Memilih/ganti hero, menekan `READY`, lalu menunggu host. |
+| 5. Loading | Menunggu kedua perangkat mengirim loaded. | Mengirim loaded setelah resource siap. |
+| 6. Battle | Menjalankan simulation authoritative dan mengirim snapshot. | Mengirim input command dan menerapkan snapshot host. |
+| 7. Keluar | Leave/Back/GameOver menghentikan session. | Leave/Back/GameOver/timeout menghentikan session. |
 
-Mode yang dipakai adalah 1v1 (`GameMode::OneVsOne`), map `1`, tick rate default `30`, dan dua slot. Host menggunakan hero `Naruto` sebagai pilihan awal, sedangkan client menggunakan `Sasuke` sebagai pilihan awal dan dapat menggantinya dari tombol `CHANGE HERO`. Host memvalidasi pilihan client sebelum pilihan tersebut dikunci ke `MatchConfig`.
+Hardware Back Android dan tombol Back memakai cleanup yang sama. Dari halaman Host/Join, Back kembali ke Network Home; dari Network Home, Back kembali ke StartMenu.
 
-## Authority model
+## Konfigurasi koneksi
 
-Client tidak mengirim posisi final, HP, damage, hasil serangan, atau status menang. Client mengirim intent `InputCommand`; host memvalidasi command, memasukkannya ke simulation queue, lalu mengirim `StateSnapshot`. Input host lokal dan input client remote menggunakan tipe command yang sama; perbedaannya hanya sumbernya.
+MVP mendukung satu host dan satu client. Host memakai UDP gameplay port `28765`; discovery memakai UDP port `28766`. Discovery hanya membantu menemukan room dan tidak menjadi syarat koneksi. Jika broadcast diblokir oleh AP isolation atau konfigurasi hotspot, gunakan alamat manual, misalnya `192.168.43.1:28765`.
 
-`GameLayer::updateNetworkBattle` menjalankan fixed-timestep accumulator di atas callback `update(dt)`. Render tetap mengikuti frame rate perangkat, sedangkan tick network memakai `MatchConfig.tickRate`. Host mengirim snapshot posisi, HP, CKR, state, dan facing untuk entity yang tersedia. Client menerapkan snapshot hanya pada entity remote; input lokal dapat diterapkan lebih cepat melalui queue command, lalu dikoreksi oleh snapshot host.
+Konfigurasi match yang dikirim host menetapkan mode `GameMode::OneVsOne`, map `1`, tick rate default `30`, dua slot, seed, match id, gear/reborn, nama player, hero, dan ready state. Host memvalidasi pilihan client sebelum memasukkannya ke `MatchConfig`.
 
-Semua event hasil polling socket masuk ke queue internal transport. Hanya main thread yang memanggil `LanSession::poll()` dan menyentuh `GameLayer`, `Hero`, atau node Cocos2d-x. Pada mode offline atau halaman Network Home tanpa session aktif, polling dilewati sepenuhnya.
+## Authority model dan lifecycle thread
 
-## Protocol
+Client tidak mengirim posisi final, HP, damage, hasil serangan, atau status menang. Client mengirim intent `InputCommand`; host memvalidasi command, memasukkannya ke simulation queue, dan mengirim `StateSnapshot`. Input lokal host dan input remote client menggunakan tipe command yang sama.
 
-Frame memiliki magic `NSV2`, protocol version, message type, payload length dengan batas `64 KiB`, sequence, tick, dan payload. Payload menggunakan integer little-endian serta string length-prefixed dengan batas panjang. Message type yang sudah dicadangkan meliputi handshake, room, lobby, `select_hero`, `ready`, `match_start`, `loaded`, `input`, `snapshot`, `ack`, `heartbeat`, leave/disconnect, result, resync, dan error.
+```text
+UI/HUD input
+  -> GameLayer / LanSession
+      -> LanProtocol validation
+          -> LanTransport UDP queue
+              -> host-authoritative session
+                  -> StateSnapshot
+                      -> client GameLayer presentation
+```
 
-Handshake dan lobby mengirim `MatchConfig`, sedangkan gameplay mengirim `InputCommand` dan `StateSnapshot`. Duplicate input remote ditolak berdasarkan sequence. Payload invalid, slot invalid, match id tidak cocok, action tidak dikenal, dan version mismatch tidak boleh diterapkan ke simulation.
+`LanTransport` memiliki worker native yang hanya menangani socket, encode/decode frame, dan queue event. Worker tidak boleh memanggil `Director`, `Node`, `Sprite`, scheduler, `GameLayer`, atau UI. `LanSession::poll()` menguras queue pada main thread melalui callback update. `LanNetworkRuntime::sharedLanSession()` mempertahankan session saat transisi lobby ke loading/battle.
 
-## Android and desktop
+Guard `networkActive()` memastikan `LanSession::poll()` dan `getRooms()` langsung dilewati ketika transport/discovery tidak aktif. Pada battle offline, `_networkBattle` false sehingga `GameLayer` tidak masuk ke update jaringan.
 
-Project Android saat ini memiliki `compileSdkVersion 31`, `targetSdkVersion 31`, dan `minSdkVersion 21`. Oleh karena itu branch ini tidak menambahkan `ACCESS_LOCAL_NETWORK`, yang baru diperlukan ketika aplikasi menaikkan target SDK ke Android 17/API 37 atau lebih tinggi. Saat target tersebut dinaikkan, request permission local network wajib ditambahkan sebelum raw UDP atau NSD dipakai; manual IP tetap harus dipertahankan sebagai fallback.
+## Protocol dan validasi
 
-Source network didaftarkan pada Android `Android.mk`, Linux `proj.linux/Makefile`, dan Windows `NarutoSenki.vcxproj`. Windows menambahkan `Ws2_32.lib`. Transport saat ini menggunakan IPv4 UDP native dan tidak membutuhkan library eksternal.
+Frame terdiri atas magic `NSV2`, protocol version, message type, payload length, sequence, tick, dan payload. Payload dibatasi maksimum `64 KiB`, menggunakan integer little-endian, dan memakai string length-prefixed dengan batas panjang.
+
+| Pesan | Arah | Tujuan |
+|---|---|---|
+| `Hello` | Client -> Host | Handshake awal dan nama client. |
+| `JoinAccept` | Host -> Client | Menerima client dan mengirim konfigurasi awal. |
+| `LobbyUpdate` | Host -> Client | Menyebarkan roster, hero, ready, map, seed, dan tick rate. |
+| `SelectHero` | Client -> Host | Pilihan hero client. |
+| `Ready` | Client -> Host | Ready/unready client. |
+| `MatchStart` | Host -> Client | Mengunci match dan memulai loading. |
+| `Loaded`/`Ack` | Dua arah | Loaded barrier sebelum battle. |
+| `Input` | Client -> Host | Intent dengan tick, slot, action, dan sequence. |
+| `Snapshot` | Host -> Client | State authoritative entity yang tersedia. |
+| `Heartbeat` | Dua arah | Memantau peer aktif. |
+| `Leave`/`Disconnect` | Dua arah | Cleanup dan akhir session. |
+
+Payload melebihi `64 KiB`, message type tidak dikenal, protocol version mismatch, match id tidak cocok, player slot invalid, action invalid, dan input dengan sequence tidak meningkat harus ditolak sebelum masuk simulation. Duplicate atau input out-of-order tidak boleh merusak state host.
+
+## Battle bridge
+
+`GameLayer::updateNetworkBattle()` menggunakan accumulator fixed-timestep di atas callback `update(dt)`. Render mengikuti frame rate perangkat, sedangkan tick network mengikuti `MatchConfig.tickRate`. Host memproses command dan mengirim snapshot posisi, HP, CKR, state, serta facing untuk entity yang tersedia. Client menerapkan snapshot host pada entity remote dan dapat melakukan respons input lokal melalui queue command.
+
+Bridge ini belum menjadikan seluruh battle sebagai simulation deterministik penuh. Projectile, summon, AI kompleks, damage event detail, tower/flog, gear interaction, reborn, result replication, snapshot interpolation, dan resync penuh masih perlu diperluas serta diuji per hero.
+
+## Android, desktop, dan permission
+
+Project Android menggunakan `compileSdkVersion 31`, `targetSdkVersion 31`, `minSdkVersion 21`, Gradle legacy, dan NDK r17c. Source Network didaftarkan pada `app/jni/Android.mk`; file tersebut harus diawali `LOCAL_PATH := $(call my-dir)`. Linux dan Windows juga mendaftarkan source network serta library UDP native masing-masing.
+
+Branch ini memakai IPv4 UDP native dan tidak memakai Android NSD picker. Dengan target SDK saat ini, branch tidak menambahkan permission local-network khusus. Jika target SDK dinaikkan, tinjau kebijakan dan permission local network sebelum raw UDP dipakai. Manual IP harus tetap dipertahankan sebagai fallback discovery.
 
 ## Test procedure
 
-Unit protocol dapat dijalankan dengan:
+Unit protocol dijalankan dengan:
 
 ```sh
 g++ -std=c++20 -Wall -Wextra -Werror \
@@ -45,7 +89,7 @@ g++ -std=c++20 -Wall -Wextra -Werror \
 /tmp/lan_protocol_test
 ```
 
-Integration loopback dua session dapat dijalankan dengan:
+Integration loopback dua session dijalankan dengan:
 
 ```sh
 g++ -std=c++20 -Wall -Wextra -Werror -pthread \
@@ -59,10 +103,26 @@ g++ -std=c++20 -Wall -Wextra -Werror -pthread \
 /tmp/lan_session_test
 ```
 
-Test perangkat harus dilakukan pada dua device yang terhubung ke hotspot yang sama. Jalur yang harus diverifikasi adalah Host membuat room, Join menemukan room atau memakai manual IP, handshake, pilihan hero, ready, start, loaded barrier, movement/normal attack sebagai command, snapshot, serta leave/disconnect dan timeout.
+Test protocol harus mencakup round-trip, payload >64 KiB, message type tidak dikenal, protocol version mismatch, dan invalid frame. Test session harus mencakup offline tanpa socket, host/client loopback, handshake, lobby, ready, loaded barrier, input, snapshot, input out-of-order, disconnect, timeout, dan cleanup.
+
+Test perangkat harus dilakukan pada dua device di hotspot yang sama. Verifikasi urutannya adalah: offline tetap ringan; Network Home dapat dibuka dan di-Back; Host membuat room; Join menemukan room atau memakai manual IP; handshake; pilihan hero; ready; start; loaded barrier; movement/normal attack sebagai command; snapshot; selesai battle; GameOver tanpa force close; leave/disconnect; dan tidak ada worker/socket yang tertinggal.
+
+## Release branch fitur
+
+APK LAN dibuat melalui workflow GitHub Actions `release-apk.yml` pada branch fitur. Release terakhir yang memuat lifecycle opt-in adalah [`v2.1.2-lan-optin`](https://github.com/sansaks-jpg/NarutoSenki-V2/releases/tag/v2.1.2-lan-optin). Asset release terdiri atas APK dan file `.sha256`; hash harus diverifikasi setelah download. Detail command workflow dan verifikasi tersedia di [release-build.md](release-build.md).
 
 ## Known limitations
 
-MVP belum menjanjikan semua hero, semua mode, 3v3/4v4, reconnect otomatis, internet matchmaking, spectator, replay, atau snapshot interpolation visual tingkat lanjut. Saat ini discovery menggunakan UDP broadcast native, bukan Android NSD picker. Battle pipeline sudah memiliki seam command/snapshot dan fixed tick, tetapi efek kompleks seperti projectile, summon, AI, damage event detail, resync penuh, dan win-condition replication perlu diperluas serta diuji per hero sebelum disebut production-ready.
+MVP belum menjanjikan semua hero, semua mode, 3v3/4v4, reconnect otomatis, internet matchmaking, spectator, replay, anti-cheat production-grade, atau snapshot interpolation tingkat lanjut. Koneksi putus selama battle berakhir dengan state `Finished`; timeout handshake dan timeout battle saat ini lima detik. Discovery menggunakan UDP broadcast, sehingga AP isolation dapat mengharuskan manual IP.
 
-Koneksi yang putus selama battle berakhir dengan state `Finished`; branch ini tidak melakukan reconnect diam-diam. Timeout handshake adalah lima detik. Heartbeat dikirim berkala selama peer tersambung dan timeout battle juga lima detik.
+## Referensi
+
+[1]: ../projects/NarutoSenki/Classes/Network/LanProtocol.hpp "LAN protocol types and limits"
+[2]: ../projects/NarutoSenki/Classes/Network/LanTransport.cpp "Native UDP transport worker"
+[3]: ../projects/NarutoSenki/Classes/Network/LanDiscovery.cpp "UDP discovery"
+[4]: ../projects/NarutoSenki/Classes/Network/LanSession.cpp "Host/client session lifecycle"
+[5]: ../projects/NarutoSenki/Classes/Network/NetworkLobbyLayer.cpp "LAN lobby UI and transitions"
+[6]: ../projects/NarutoSenki/Classes/GameLayer.cpp "Battle command and snapshot bridge"
+[7]: ../tests/lan_protocol_test.cpp "Protocol tests"
+[8]: ../tests/lan_session_test.cpp "Session loopback and offline tests"
+[9]: ../.github/workflows/release-apk.yml "APK release workflow"

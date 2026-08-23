@@ -6,6 +6,8 @@
 
 English (includes **Linux, Windows, Android, macOS** build steps): **[Doc/README.md](Doc/README.md)**
 
+For the LAN/hotspot multiplayer MVP on the feature branch, see **[structured documentation](docs/README.md)** and the **[LAN multiplayer guide](docs/lan-multiplayer.md)**. These documents describe `feature/lan-hotspot-multiplayer` only; the LAN changes are not part of `main`/`master` unless merged.
+
 [简体中文](Doc/README_ZH.md)
 
 ## Download

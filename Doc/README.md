@@ -90,6 +90,8 @@ Get the latest developments👇
 - **REMOVED**
   - All network codes & dependence (websocket)
   - [Config] Removed `Hidan` & `Kakuzu` & `Chiyo` hurt sound (It doesn't existed)
+
+> Historical note: the networking removal above describes the legacy upstream baseline. The branch `feature/lan-hotspot-multiplayer` adds a separate LAN/hotspot 1v1 MVP under `projects/NarutoSenki/Classes/Network`; see [`../docs/lan-multiplayer.md`](../docs/lan-multiplayer.md).
 - **FEATURES**
   - [Linux & Windows] Half keyboard supported (Only working on battle scene)
 

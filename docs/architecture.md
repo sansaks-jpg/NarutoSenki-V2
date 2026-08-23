@@ -10,6 +10,7 @@ NarutoSenki-V2 adalah game 2D yang dibangun di atas **Cocos2d-x 2.2.6 yang dikus
 | Engine | `cocos2dx` | Director, Scene, Node, Sprite, Action, input, renderer, resource resolver, tilemap, dan platform abstraction. |
 | Scripting | `scripting/lua`, `projects/NarutoSenki/lua` | LuaJIT, binding C++–Lua, bootstrap, scene/menu UI, utility, audio, dan helper. |
 | Game runtime | `projects/NarutoSenki/Classes` | Battle simulation, character, skill, projectile, tower, flog, map, game mode, HUD, save, dan scene. |
+| LAN networking | `projects/NarutoSenki/Classes/Network` | Protocol/frame validation, UDP transport, broadcast discovery, host/client session, lobby state, command/snapshot bridge, dan shared runtime. |
 | Data/resource | `projects/NarutoSenki/Resources` | Atlas, sprite frame, audio `.ogg`, map, font, metadata, UI, dan konfigurasi. |
 | Third-party | `external`, `extensions`, `CocosDenshion` | fmt, GLFW, SQLite3, TOML, GUI/CocoStudio, dan audio implementation. |
 
@@ -18,6 +19,12 @@ NarutoSenki-V2 adalah game 2D yang dibangun di atas **Cocos2d-x 2.2.6 yang dikus
 `Classes/CharacterBase.*` adalah basis unit yang menyimpan state, HP/CKR, target, buff, collision, animation, damage, visibility, group, role, dan lifecycle. `Core/Hero.hpp` menambahkan perilaku player/AI, normal attack, skill, Ougi, gear, reborn, level, dan resource combat. Implementasi karakter per hero berada di `Core/Shinobi`; summon berada di `Core/Kuchiyose`, guardian di `Core/Guardian`, clone di `Core/Bunshin`, tower di `Core/Tower`, dan unit wave di `Core/Warrior`.
 
 `Core/Provider.hpp` adalah factory string-to-class untuk membuat hero, clone, guardian, dan summon. `GameMode` menentukan aturan match, roster, map, team, tower, flog, randomisasi, gear, dan lifecycle. `Systems` menyediakan `CommandSystem`, `BattleRuntimeSystem`, `SpawnSystem`, `SessionState`, serta initializer. `GameLayer` menggabungkan world scene, unit array, mode handler, physics/collision sederhana, input, dan HUD.
+
+### LAN networking boundary
+
+`Classes/Network` terdiri atas empat tanggung jawab. `LanProtocol` melakukan serialisasi/deserialisasi frame, batas payload, validasi message type, protocol version, sequence, dan data match. `LanTransport` memiliki worker native UDP yang hanya menerima/mengirim data dan memasukkan event ke queue; worker tidak boleh memanggil Cocos2d-x. `LanDiscovery` menjalankan broadcast room advertisement. `LanSession` menjadi state machine host/client untuk handshake, lobby, ready/loading barrier, input, snapshot, heartbeat, timeout, dan cleanup.
+
+`LanNetworkRuntime::sharedLanSession()` menyediakan satu session yang melewati transisi lobby ke battle. Session tersebut bersifat **opt-in**: constructor dan mode offline tidak membuat socket; transport/discovery baru dimulai oleh `host()`, `join()`, atau `startScan()`. `NetworkLobbyLayer` dan `GameLayer` memanggil `poll()` hanya di main thread, sedangkan `GameLayer` tetap menjadi pemilik simulation dan presentation.
 
 | Modul | Kontrak penting |
 |---|---|
@@ -30,6 +37,7 @@ NarutoSenki-V2 adalah game 2D yang dibangun di atas **Cocos2d-x 2.2.6 yang dikus
 | `Parser` | Membaca metadata unit TOML menjadi `UnitMetadata` dan action data. |
 | `KTools` | SQLite save/record, coin, win count, dan best time. |
 | `Cocos2dxHelper` | Sprite helper, format compatibility, dan bridge callback Lua. |
+| `Classes/Network` | UDP transport/discovery, protocol, session state machine, dan bridge command/snapshot. |
 
 ## Layer Lua
 
@@ -46,6 +54,8 @@ Perubahan lifecycle harus diuji pada tiga titik: masuk scene, keluar scene, dan 
 ## Dependency boundary
 
 Engine/vendor sebaiknya dianggap read-only untuk perubahan fitur game. Jika API engine kurang, tambahkan adapter kecil di `Classes/Utils` atau layer game. Perubahan pada `cocos2dx`, LuaJIT, extensions, atau prebuilt library harus memiliki alasan lintas platform dan diverifikasi pada target yang terdampak.
+
+Untuk LAN, dependency boundary lebih ketat: kode worker transport harus bebas dari `Director`, `Node`, `Sprite`, scheduler, dan callback UI. Event jaringan diproses melalui `LanSession::poll()` pada callback `update(dt)` main thread. Mode offline tidak boleh memanggil polling LAN atau membuat socket.
 
 ## Referensi
 

@@ -52,7 +52,9 @@ Perubahan pada damage, cooldown, spawn, atau win condition sebaiknya tidak dilet
 
 ## Extension multiplayer
 
-Mode online sebaiknya dibuat sebagai handler/rule baru atau online variant terpisah, bukan mengubah `Classic` secara diam-diam. State match harus memiliki match id, player id, tick, seed, roster lock, input command, snapshot, dan result. Server harus memvalidasi damage, cooldown, resource, spawn, dan win condition.
+Branch `feature/lan-hotspot-multiplayer` sudah menyediakan variant LAN 1v1 melalui `NetworkLobbyLayer`, `LanSession`, dan bridge `GameLayer`. Konfigurasi match membawa match id, slot/player, mode, map, seed, tick rate, roster, gear, dan reborn. Client mengirim `InputCommand`; host memvalidasi input dan mengirim `StateSnapshot`. Posisi atau hasil final dari client tidak boleh dijadikan sumber kebenaran.
+
+LAN bersifat opt-in. Offline/Training tidak membuat socket dan tidak menjalankan polling. Transport UDP, discovery, dan worker baru aktif setelah Host atau Join dipilih, lalu harus dihentikan ketika Leave, Back, GameOver, timeout, atau scene keluar. Perluasan ke semua hero, mode team, efek kompleks, reconnect, resync, dan internet server tetap merupakan pekerjaan roadmap berikutnya.
 
 ## Referensi
 

@@ -169,6 +169,10 @@ Untuk mengubah label, sprite, atau susunan menu, mulai dari `projects/NarutoSenk
 
 Untuk memperluas mode LAN, mulai dari `NetworkLobbyLayer`, `LanSession`, `LanProtocol`, dan bridge `GameLayer`. UI hanya mengirim intent Host/Join/ready/start; state authoritative tetap berada pada session dan GameLayer. Jangan mengaktifkan jaringan dari Training atau mode offline.
 
+### Standar Tipografi & Tombol UI LAN
+- **Font Bitmap**: Gunakan `Fonts::Default` (`"Fonts/1.fnt"`) untuk semua teks bitmap (`CCLabelBMFont`). File `white.fnt` dan `yellow.fnt` hanya memuat karakter angka `0-9`, sehingga penggunaan keduanya untuk teks alfabet akan menghasilkan label kosong.
+- **Komponen Tombol**: Gunakan `makeButton()` berbasis 9-slice `input_bg.png` dengan label `1.fnt` di tengahnya. Jangan menggunakan sprite `yes_btn1.png` / `no_btn1.png` untuk tombol fungsi umum (seperti HOST / JOIN / READY / OK) karena sprite tersebut sudah memiliki tulisan hardcoded "YES" / "NO".
+
 ## Referensi
 
 [1]: ../projects/NarutoSenki/Classes/StartMenu.cpp "Start menu and menu button callbacks"

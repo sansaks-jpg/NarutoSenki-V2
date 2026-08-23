@@ -464,7 +464,10 @@ public:
 			}
 			if (isNotPlayer())
 			{
-				doAI();
+				if (!getGameLayer() || !getGameLayer()->_networkBattle)
+				{
+					doAI();
+				}
 			}
 			else
 			{

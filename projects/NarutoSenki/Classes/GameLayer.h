@@ -214,6 +214,8 @@ private:
 	uint8_t _networkLocalSlot = 0;
 	uint32_t _networkTick = 0;
 	float _networkAccumulator = 0.0f;
+	float _lastNetworkJoystickSendTime = 0.0f;
+	float _networkBattleTime = 0.0f;
 	vector<OnHUDInitializedCallback> callbackssList;
 
 	std::unique_ptr<BattleRuntimeSystem> _battleRuntimeSystem;

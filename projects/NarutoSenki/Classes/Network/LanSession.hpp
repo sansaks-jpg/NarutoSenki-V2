@@ -115,6 +115,7 @@ private:
     uint64_t _sessionStartedMs = 0;
     uint64_t _lastReceiveMs = 0;
     uint64_t _lastHeartbeatMs = 0;
+    uint64_t _lastHelloSendMs = 0;
 };
 
 } // namespace nsv2::network

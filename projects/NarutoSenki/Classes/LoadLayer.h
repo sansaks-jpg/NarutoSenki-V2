@@ -34,6 +34,7 @@ public:
 	void preloadIMG();
 	void playBGM(float dt);
 	void onLoadFinish(float dt);
+	void update(float dt) override;
 
 	CREATE_FUNC(LoadLayer);
 	static void perloadCharIMG(const string &name);

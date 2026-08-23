@@ -61,6 +61,7 @@ LanSession::~LanSession()
 void LanSession::setState(SessionState state, const std::string &notice)
 {
     _state = state;
+    _lastReceiveMs = nowMs();
     if (!notice.empty())
         _notices.push_back({state, notice});
 }
@@ -154,6 +155,7 @@ bool LanSession::join(const std::string &address, uint16_t port, const std::stri
     _sessionStartedMs = nowMs();
     _lastReceiveMs = _sessionStartedMs;
     _lastHeartbeatMs = _sessionStartedMs;
+    _lastHelloSendMs = _sessionStartedMs;
     setState(SessionState::Connecting, "Menghubungkan ke host...");
     return true;
 }
@@ -335,7 +337,7 @@ bool LanSession::validateInput(const InputCommand &command, std::string *error) 
             *error = "player slot input tidak valid";
         return false;
     }
-    if (command.action < ActionType::Move || command.action > ActionType::NormalAttack)
+    if (command.action < ActionType::Move || command.action > ActionType::Item1)
     {
         if (error)
             *error = "action input tidak valid";
@@ -354,18 +356,15 @@ bool LanSession::submitInput(const InputCommand &command, std::string *error)
     if (!validateInput(normalized, error))
         return false;
 
-    if (_role == SessionRole::Host)
+    if (_remoteConnected)
     {
-        _inputCommands.push_back(normalized);
-        return true;
+        Message message;
+        message.type = MessageType::Input;
+        message.sequence = normalized.sequence;
+        message.tick = normalized.tick;
+        if (encodeInputCommand(normalized, message.payload, error))
+            sendToRemote(message, error);
     }
-
-    Message message;
-    message.type = MessageType::Input;
-    message.sequence = normalized.sequence;
-    message.tick = normalized.tick;
-    if (!encodeInputCommand(normalized, message.payload, error) || !sendToRemote(message, error))
-        return false;
     _inputCommands.push_back(normalized);
     return true;
 }
@@ -483,13 +482,13 @@ void LanSession::handleMessage(const TransportEvent &event)
         return;
     }
 
-    if (_role == SessionRole::Host && message.type == MessageType::Input && _remoteConnected &&
-        _state == SessionState::Battle)
+    if (message.type == MessageType::Input && _remoteConnected && _state == SessionState::Battle)
     {
         InputCommand command;
         std::string error;
+        const uint8_t expectedSlot = (_role == SessionRole::Host) ? 1 : 0;
         if (!decodeInputCommand(message.payload, command, &error) ||
-            command.playerSlot != 1 || command.sequence <= _lastRemoteInputSequence ||
+            command.playerSlot != expectedSlot || command.sequence <= _lastRemoteInputSequence ||
             !validateInput(command, &error))
             return;
         _lastRemoteInputSequence = command.sequence;
@@ -559,12 +558,21 @@ void LanSession::handleMessage(const TransportEvent &event)
 
     if (message.type == MessageType::Leave || message.type == MessageType::Disconnect)
     {
-        _remoteConnected = false;
-        _remoteLoaded = false;
-        if (_role == SessionRole::Host)
-            setState(SessionState::Hosting, "Pemain keluar dari room.");
-        else
-            setState(SessionState::Finished, "Koneksi ke host berakhir.");
+        if (_remoteConnected && event.address == _remoteAddress && event.port == _remotePort)
+        {
+            _remoteConnected = false;
+            _remoteLoaded = false;
+            if (_role == SessionRole::Host)
+            {
+                _config.slots.resize(1);
+                setState(SessionState::Hosting, "Pemain keluar dari room.");
+            }
+            else
+            {
+                setState(SessionState::Finished, "Koneksi ke host berakhir.");
+            }
+        }
+        return;
     }
 }
 
@@ -576,10 +584,7 @@ void LanSession::handleTransportEvents(const std::vector<TransportEvent> &events
         {
             handleMessage(event);
         }
-        else if (event.type == TransportEventType::Error && _state != SessionState::Idle)
-        {
-            setState(SessionState::Error, event.error);
-        }
+        // Non-fatal UDP decode errors are dropped silently without crashing the session (Fix H2)
     }
 }
 
@@ -606,16 +611,45 @@ void LanSession::poll()
         _lastHeartbeatMs = currentMs;
     }
 
-    if (_state == SessionState::Connecting && currentMs - _sessionStartedMs >= 5000)
+    if (_state == SessionState::Connecting)
     {
-        _transport.stop();
-        setState(SessionState::Error, "Timeout handshake: host tidak merespons.");
+        // Retransmit Hello handshake every 600ms (Fix C6)
+        if (currentMs - _lastHelloSendMs >= 600)
+        {
+            Message hello;
+            hello.type = MessageType::Hello;
+            hello.sequence = _nextSequence++;
+            encodeString(_localPlayerName, hello.payload, kMaxPlayerName);
+            std::string ignored;
+            _transport.send(hello, _remoteAddress, _remotePort, &ignored);
+            _lastHelloSendMs = currentMs;
+        }
+        if (currentMs - _sessionStartedMs >= 6000)
+        {
+            _transport.stop();
+            setState(SessionState::Error, "Timeout handshake: host tidak merespons.");
+        }
     }
-    else if (_state == SessionState::Battle && _remoteConnected && currentMs - _lastReceiveMs >= 5000)
+    else if (_state == SessionState::Lobby && _remoteConnected && _role == SessionRole::Host)
     {
-        _transport.stop();
-        _remoteConnected = false;
-        setState(SessionState::Finished, "Koneksi battle terputus; match berakhir.");
+        // Lobby heartbeat timeout (10s) to clean up ghost players (Fix H3)
+        if (_lastReceiveMs > 0 && (currentMs - _lastReceiveMs >= 10000))
+        {
+            _remoteConnected = false;
+            _config.slots.resize(1);
+            setState(SessionState::Hosting, "Client terputus.");
+            sendLobbyUpdate();
+        }
+    }
+    else if (_state == SessionState::Battle && _remoteConnected)
+    {
+        // Battle disconnect timeout (6s after first packet is received) (Fix C5)
+        if (_lastReceiveMs > 0 && (currentMs - _lastReceiveMs >= 6000))
+        {
+            _transport.stop();
+            _remoteConnected = false;
+            setState(SessionState::Finished, "Koneksi battle terputus; match berakhir.");
+        }
     }
 }
 

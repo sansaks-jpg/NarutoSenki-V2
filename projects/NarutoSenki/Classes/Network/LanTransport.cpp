@@ -364,7 +364,13 @@ void LanTransport::stop()
         socket = nativeSocket(_socket);
         _socket = -1;
     }
-    closeNativeSocket(socket);
+    if (socket != kInvalidSocket)
+    {
+        closeNativeSocket(socket);
+#if defined(_WIN32)
+        WSACleanup();
+#endif
+    }
     _localPort = 0;
     _isHost = false;
     _remoteAddress.clear();

@@ -134,6 +134,8 @@ public:
 		gd.isHardCore = !config.enableGear;
 		gd.isRandomChar = false;
 		gd.use4v4SpawnLayout = false;
+		gd.enableHeroReborn = config.enableReborn;
+		setHero(config.enableReborn);
 		for (const auto &slot : config.slots)
 		{
 			if (slot.heroName.empty())

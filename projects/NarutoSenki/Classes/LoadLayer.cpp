@@ -60,6 +60,7 @@ bool LoadLayer::init()
 	_enableGear = gd.enableGear;
 	_isHardCoreMode = gd.isHardCore;
 
+	scheduleUpdate();
 	return true;
 }
 
@@ -375,4 +376,13 @@ void LoadLayer::onLoadFinish(float dt)
 	gameScene->addChild(_hudLayer, kHudLayerOrder);
 
 	Director::sharedDirector()->replaceScene(TransitionFade::create(0.5f, gameScene));
+}
+
+void LoadLayer::update(float dt)
+{
+	(void)dt;
+	if (_networkBattle)
+	{
+		nsv2::network::sharedLanSession().poll();
+	}
 }

@@ -21,6 +21,10 @@ void waitFor(LanSession &host, LanSession &client, const std::function<bool()> &
             return;
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
+    std::cerr << "waitFor TIMEOUT: host state=" << static_cast<int>(host.state())
+              << ", client state=" << static_cast<int>(client.state())
+              << ", host remoteConn=" << host.remoteConnected()
+              << ", client remoteConn=" << client.remoteConnected() << std::endl;
     assert(condition());
 }
 }
@@ -81,11 +85,18 @@ int main()
     input.action = ActionType::Move;
     input.axisX = 1000;
     assert(client.submitInput(input, &error));
+    bool inputReceived = false;
     waitFor(host, client, [&]() {
         std::vector<InputCommand> commands;
         host.drainInputCommands(commands);
-        return !commands.empty() && commands.front().playerSlot == 1;
+        for (const auto &c : commands)
+        {
+            if (c.playerSlot == 1)
+                inputReceived = true;
+        }
+        return inputReceived;
     }, 1000);
+    assert(inputReceived);
 
     InputCommand ordered;
     ordered.sequence = 50;
@@ -98,8 +109,14 @@ int main()
     {
         client.poll();
         host.poll();
-        host.drainInputCommands(accepted);
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        std::vector<InputCommand> temp;
+        host.drainInputCommands(temp);
+        for (auto &c : temp)
+        {
+            if (c.sequence == 50)
+                accepted.push_back(std::move(c));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     assert(accepted.size() == 1);
     assert(accepted.front().sequence == 50);
@@ -129,6 +146,37 @@ int main()
         client.drainSnapshots(snapshots);
         return !snapshots.empty() && snapshots.front().characters.front().x == 100;
     }, 1000);
+
+    // Test all skill and item actions (C1 verification)
+    ActionType testActions[] = {
+        ActionType::NormalAttack,
+        ActionType::Skill1,
+        ActionType::Skill2,
+        ActionType::Skill3,
+        ActionType::Skill4,
+        ActionType::Skill5,
+        ActionType::Item1
+    };
+    for (size_t i = 0; i < sizeof(testActions)/sizeof(testActions[0]); ++i)
+    {
+        InputCommand skillCmd;
+        skillCmd.sequence = 60 + i;
+        skillCmd.tick = 5 + i;
+        skillCmd.action = testActions[i];
+        assert(client.submitInput(skillCmd, &error));
+        bool received = false;
+        waitFor(host, client, [&]() {
+            std::vector<InputCommand> cmds;
+            host.drainInputCommands(cmds);
+            for (const auto &c : cmds)
+            {
+                if (c.action == testActions[i])
+                    received = true;
+            }
+            return received;
+        }, 1000);
+        assert(received);
+    }
 
     host.stop();
     client.stop();

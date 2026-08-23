@@ -683,15 +683,29 @@ void GameLayer::enableNetworkBattle(uint8_t localSlot)
 	_networkLocalSlot = localSlot;
 	_networkTick = 0;
 	_networkAccumulator = 0.0f;
+	_lastNetworkJoystickSendTime = 0.0f;
+	_networkBattleTime = 0.0f;
 }
 
 void GameLayer::updateNetworkBattle(float dt)
 {
 	if (!_networkBattle)
 		return;
+	_networkBattleTime += dt;
 	using namespace nsv2::network;
 	auto &session = sharedLanSession();
 	session.poll();
+
+	if (session.state() == SessionState::Finished || session.state() == SessionState::Error)
+	{
+		std::vector<SessionNotice> notices;
+		session.drainNotices(notices);
+		std::string noticeText = notices.empty() ? "Opponent disconnected." : notices.back().text;
+		KTools::showNotice(noticeText.c_str(), 2.0f);
+		onGameOver();
+		return;
+	}
+
 	const uint16_t tickRate = session.matchConfig().tickRate == 0 ? 30 : session.matchConfig().tickRate;
 	const float step = 1.0f / static_cast<float>(tickRate);
 	_networkAccumulator += MIN(dt, 0.25f);
@@ -782,11 +796,26 @@ void GameLayer::applyNetworkSnapshot(const nsv2::network::StateSnapshot &snapsho
 		return;
 	for (const auto &state : snapshot.characters)
 	{
-		if (state.slot == _networkLocalSlot || state.slot >= _CharacterArray.size())
+		if (state.slot >= _CharacterArray.size())
 			continue;
 		auto *character = _CharacterArray[state.slot];
 		if (!character)
 			continue;
+
+		if (state.slot == _networkLocalSlot)
+		{
+			// Host authoritative health and chakra synchronization
+			if (character->getHP() != state.hp)
+			{
+				character->setHP(state.hp);
+				if (getHudLayer() && getHudLayer()->status_hpbar)
+					setHPLose(character->getHpPercent());
+			}
+			character->setCKR(state.ckr);
+			continue;
+		}
+
+		// Remote character synchronization
 		character->setPosition(Vec2(state.x / 100.0f, state.y / 100.0f));
 		character->setFlipX(state.flipped);
 		character->setHP(state.hp);
@@ -798,10 +827,18 @@ void GameLayer::JoyStickRelease()
 {
 	if (_networkBattle)
 	{
-		nsv2::network::InputCommand command;
-		command.tick = _networkTick;
-		command.action = nsv2::network::ActionType::Move;
-		nsv2::network::sharedLanSession().submitInput(command);
+		// Send burst (3x) to guarantee release packet is received over UDP (Fix H4)
+		for (int i = 0; i < 3; ++i)
+		{
+			nsv2::network::InputCommand command;
+			command.tick = _networkTick;
+			command.action = nsv2::network::ActionType::Move;
+			command.axisX = 0;
+			command.axisY = 0;
+			nsv2::network::sharedLanSession().submitInput(command);
+		}
+		if (currentPlayer && currentPlayer->getState() == State::WALK)
+			currentPlayer->idle();
 		return;
 	}
 	if (currentPlayer->getState() == State::WALK)
@@ -814,6 +851,10 @@ void GameLayer::JoyStickUpdate(Vec2 direction)
 {
 	if (_networkBattle)
 	{
+		if (_networkBattleTime - _lastNetworkJoystickSendTime < 0.030f)
+			return; // Rate limit to ~33 packets/sec (Fix L5)
+		_lastNetworkJoystickSendTime = _networkBattleTime;
+
 		nsv2::network::InputCommand command;
 		command.tick = _networkTick;
 		command.action = nsv2::network::ActionType::Move;

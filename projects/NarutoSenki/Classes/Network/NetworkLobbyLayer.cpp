@@ -619,6 +619,9 @@ void NetworkLobbyLayer::enterNetworkBattle()
     auto handler = getGameModeHandler();
     handler->initNetworkHeros(_session->matchConfig(), _session->localSlot());
 
+    addSprites("UI.plist");
+    addSprites("Menu.plist");
+
     auto loadScene = Scene::create();
     auto loadLayer = LoadLayer::create();
     loadLayer->configureNetworkBattle(_session->localSlot());

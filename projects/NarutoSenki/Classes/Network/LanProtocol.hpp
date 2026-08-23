@@ -42,6 +42,12 @@ enum class ActionType : uint8_t
 {
     Move = 1,
     NormalAttack = 2,
+    Skill1 = 3,
+    Skill2 = 4,
+    Skill3 = 5,
+    Skill4 = 6,
+    Skill5 = 7,
+    Item1 = 8,
 };
 
 enum class GroupId : uint8_t

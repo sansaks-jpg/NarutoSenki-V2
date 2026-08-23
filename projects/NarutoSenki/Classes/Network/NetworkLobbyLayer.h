@@ -2,6 +2,7 @@
 
 #include "Defines.h"
 #include "Network/LanNetworkRuntime.hpp"
+#include "Data/Fonts.h"
 #include "cocos-ext.h"
 
 class NetworkLobbyLayer : public Layer, public cocos2d::extension::CCEditBoxDelegate
@@ -41,12 +42,11 @@ private:
     void onExit() override;
     void renderPage();
     void renderHeader();
+    void renderHomePage();
     void renderHostPage();
     void renderJoinPage();
-    void renderLobbyPage();
     void enterNetworkBattle();
     void setMessage(const std::string &message);
-    void addButton(Menu *menu, const char *label, SEL_MenuHandler selector, int tag, float y);
     std::string selectedAddress() const;
     uint16_t selectedPort() const;
 
@@ -55,12 +55,12 @@ private:
     std::vector<nsv2::network::RoomAdvertisement> _rooms;
     std::string _message;
     std::string _roomsFingerprint;
+    std::string _savedIpText = "127.0.0.1:28765";
     nsv2::network::SessionState _lastSessionState = nsv2::network::SessionState::Idle;
     cocos2d::extension::CCEditBox *_ipEditBox = nullptr;
-    cocos2d::extension::CCEditBox *_roomEditBox = nullptr;
     CCLabelTTF *_statusLabel = nullptr;
-    CCLabelTTF *_roomLabel = nullptr;
     int _frameCounter = 0;
     bool _battleEntered = false;
     bool _leavingNetwork = false;
+    int _localHeroIndex = 0;
 };

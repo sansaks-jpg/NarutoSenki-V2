@@ -138,7 +138,7 @@ bool validMessageType(uint16_t raw)
 bool validAction(uint8_t raw)
 {
     return raw >= static_cast<uint8_t>(ActionType::Move) &&
-           raw <= static_cast<uint8_t>(ActionType::NormalAttack);
+           raw <= static_cast<uint8_t>(ActionType::Item1);
 }
 
 bool decodeReaderResult(Reader &reader, std::string *error)

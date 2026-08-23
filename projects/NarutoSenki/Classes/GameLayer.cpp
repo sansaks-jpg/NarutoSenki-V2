@@ -750,6 +750,30 @@ void GameLayer::applyNetworkCommand(const nsv2::network::InputCommand &command)
 	{
 		character->attack(NAttack);
 	}
+	else if (command.action == nsv2::network::ActionType::Skill1)
+	{
+		character->attack(Skill1);
+	}
+	else if (command.action == nsv2::network::ActionType::Skill2)
+	{
+		character->attack(Skill2);
+	}
+	else if (command.action == nsv2::network::ActionType::Skill3)
+	{
+		character->attack(Skill3);
+	}
+	else if (command.action == nsv2::network::ActionType::Skill4)
+	{
+		character->attack(Skill4);
+	}
+	else if (command.action == nsv2::network::ActionType::Skill5)
+	{
+		character->attack(Skill5);
+	}
+	else if (command.action == nsv2::network::ActionType::Item1)
+	{
+		character->setItem(Item1);
+	}
 }
 
 void GameLayer::applyNetworkSnapshot(const nsv2::network::StateSnapshot &snapshot)
@@ -809,11 +833,28 @@ void GameLayer::attackButtonClick(ABType type)
 {
 	if (_networkBattle)
 	{
-		if (type != NAttack)
-			return;
 		nsv2::network::InputCommand command;
 		command.tick = _networkTick;
-		command.action = nsv2::network::ActionType::NormalAttack;
+		if (type == NAttack)
+		{
+			_isAttackButtonRelease = false;
+			command.action = nsv2::network::ActionType::NormalAttack;
+		}
+		else if (type == Skill1)
+			command.action = nsv2::network::ActionType::Skill1;
+		else if (type == Skill2)
+			command.action = nsv2::network::ActionType::Skill2;
+		else if (type == Skill3)
+			command.action = nsv2::network::ActionType::Skill3;
+		else if (type == Skill4)
+			command.action = nsv2::network::ActionType::Skill4;
+		else if (type == Skill5)
+			command.action = nsv2::network::ActionType::Skill5;
+		else if (type == Item1)
+			command.action = nsv2::network::ActionType::Item1;
+		else
+			return;
+
 		nsv2::network::sharedLanSession().submitInput(command);
 		return;
 	}

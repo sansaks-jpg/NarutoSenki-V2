@@ -104,6 +104,17 @@ void testInputRoundTrip()
     assert(decoded.playerSlot == source.playerSlot);
     assert(decoded.axisX == source.axisX);
     assert(decoded.axisY == source.axisY);
+
+    // Test Skill actions
+    source.action = ActionType::Skill1;
+    assert(encodeInputCommand(source, bytes, &error));
+    assert(decodeInputCommand(bytes, decoded, &error));
+    assert(decoded.action == ActionType::Skill1);
+
+    source.action = ActionType::Item1;
+    assert(encodeInputCommand(source, bytes, &error));
+    assert(decodeInputCommand(bytes, decoded, &error));
+    assert(decoded.action == ActionType::Item1);
 }
 
 void testRejectsOversizedPayload()

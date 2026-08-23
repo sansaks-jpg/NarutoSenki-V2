@@ -109,6 +109,7 @@ jobs:
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
 
       - name: Upload APK artifact
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: NarutoSenki-${{ steps.apk.outputs.release_tag }}

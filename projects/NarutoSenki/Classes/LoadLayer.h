@@ -20,7 +20,15 @@ public:
 	PROP_PTR(HudLayer, _hudLayer, HudLayer);
 
 	bool _isHardCoreMode;
-	bool _enableGear;
+    bool _enableGear;
+    bool _networkBattle = false;
+    uint8_t _networkLocalSlot = 0;
+
+    void configureNetworkBattle(uint8_t localSlot)
+    {
+        _networkBattle = true;
+        _networkLocalSlot = localSlot;
+    }
 
 	void preloadAudio();
 	void preloadIMG();

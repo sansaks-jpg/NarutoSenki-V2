@@ -19,6 +19,12 @@ SOURCES = main.cpp \
 	../Classes/PauseLayer.cpp \
 	../Classes/SelectLayer.cpp \
 	../Classes/StartMenu.cpp \
+	../Classes/Network/LanProtocol.cpp \
+	../Classes/Network/LanTransport.cpp \
+	../Classes/Network/LanDiscovery.cpp \
+	../Classes/Network/LanSession.cpp \
+	../Classes/Network/LanNetworkRuntime.cpp \
+	../Classes/Network/NetworkLobbyLayer.cpp \
 	../Classes/UI/GameModeLayer.cpp \
 	../Classes/MyUtils/CCScrewLayer.cpp \
 	../Classes/MyUtils/CCShake.cpp \
@@ -30,11 +36,11 @@ SHAREDLIBS += -lcocos2d -lcocosdenshion -lsqlite3 -llua -lluajit
 COCOS_LIBS = $(LIB_DIR)/libcocos2d.so \
 	$(LIB_DIR)/libcocosdenshion.so \
 	$(LIB_DIR)/liblua.so \
-	$(LIB_DIR)/libluajit.so \
+	$(LIB_DIR)/libluajit.so
 
 include ../../../cocos2dx/proj.linux/cocos2dx.mk
 
-INCLUDES +=	 -I../ \
+INCLUDES += 	-I../ \
 	-I../../ \
 	-I../Classes \
 	-I../Classes/Core \
@@ -43,7 +49,7 @@ INCLUDES +=	 -I../ \
 	-I$(COCOS_ROOT)/external \
 	-I$(COCOS_ROOT)/scripting/lua/luajit/include \
 	-I$(COCOS_ROOT)/scripting/lua/tolua \
-	-I$(COCOS_ROOT)/scripting/lua/cocos2dx_support \
+	-I$(COCOS_ROOT)/scripting/lua/cocos2dx_support
 
 CXXFLAGS += -std=c++20
 

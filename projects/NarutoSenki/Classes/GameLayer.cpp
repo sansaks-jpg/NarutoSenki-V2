@@ -10,6 +10,7 @@
 #include "Systems/BattleRuntimeSystem.hpp"
 #include "Systems/SpawnSystem.hpp"
 #include "Systems/SessionState.hpp"
+#include "Network/LanNetworkRuntime.hpp"
 
 GameLayer *_gLayer = nullptr;
 bool _isFullScreen = false;
@@ -32,12 +33,13 @@ void BattleRuntimeSystem::onGameStart(GameLayer *layer, bool skipInitFlogs, floa
 	}
 
 	layer->setKeyEventHandler();
-	for (auto hero : layer->_CharacterArray)
-	{
-		hero->setWalkSpeed(hero->_originSpeed);
-		if (hero->isCom())
-			hero->doAI();
-	}
+			for (auto hero : layer->_CharacterArray)
+		{
+			hero->setWalkSpeed(hero->_originSpeed);
+			if (hero->isCom() && !layer->_networkBattle)
+				hero->doAI();
+		}
+
 }
 
 void BattleRuntimeSystem::updateGameTime(GameLayer *layer) const
@@ -202,14 +204,19 @@ bool GameLayer::isHUDInit()
 
 void GameLayer::initTileMap()
 {
-	setRand();
 	int mapCount = getMapCount();
 	if (mapCount == 0)
 	{
 		CCMessageBox("Not found any map", "[Error] Not found any map");
 		return;
 	}
-	mapId = random(mapCount) + 1;
+	if (_networkBattle)
+		mapId = nsv2::network::sharedLanSession().matchConfig().mapId;
+	else
+	{
+		setRand();
+		mapId = random(mapCount) + 1;
+	}
 	currentMap = TMXTiledMap::create(GetMapPath(mapId));
 	addChild(currentMap, kMapOrder);
 }
@@ -332,6 +339,8 @@ void GameLayer::initHeros()
 	initTower();
 
 	schedule(schedule_selector(GameLayer::updateViewPoint), 0.00f);
+	if (_networkBattle)
+		schedule(schedule_selector(GameLayer::updateNetworkBattle), 0.00f);
 	scheduleOnce(schedule_selector(GameLayer::playGameOpeningAnimation), 0.5f);
 }
 
@@ -667,8 +676,109 @@ void GameLayer::clearDoubleClick()
 	}
 }
 
+void GameLayer::enableNetworkBattle(uint8_t localSlot)
+{
+	_networkBattle = true;
+	_networkLocalSlot = localSlot;
+	_networkTick = 0;
+	_networkAccumulator = 0.0f;
+}
+
+void GameLayer::updateNetworkBattle(float dt)
+{
+	if (!_networkBattle)
+		return;
+	using namespace nsv2::network;
+	auto &session = sharedLanSession();
+	session.poll();
+	const uint16_t tickRate = session.matchConfig().tickRate == 0 ? 30 : session.matchConfig().tickRate;
+	const float step = 1.0f / static_cast<float>(tickRate);
+	_networkAccumulator += MIN(dt, 0.25f);
+	while (_networkAccumulator >= step)
+	{
+		_networkAccumulator -= step;
+		++_networkTick;
+		std::vector<InputCommand> commands;
+		session.drainInputCommands(commands);
+		for (const auto &command : commands)
+			applyNetworkCommand(command);
+
+		if (session.role() == SessionRole::Host && (_networkTick % 2 == 0))
+		{
+			StateSnapshot snapshot;
+			snapshot.matchId = session.matchConfig().matchId;
+			snapshot.tick = _networkTick;
+			for (size_t i = 0; i < _CharacterArray.size() && i < session.matchConfig().maxPlayers; ++i)
+			{
+				auto *character = _CharacterArray[i];
+				if (!character)
+					continue;
+				snapshot.characters.push_back({static_cast<uint8_t>(i),
+					static_cast<int32_t>(character->getPositionX() * 100.0f),
+					static_cast<int32_t>(character->getPositionY() * 100.0f),
+					character->getHP(), character->getCKR(),
+					static_cast<uint8_t>(character->getState()), character->_isFlipped});
+			}
+			std::string error;
+			session.sendSnapshot(snapshot, &error);
+		}
+	}
+
+	std::vector<StateSnapshot> snapshots;
+	session.drainSnapshots(snapshots);
+	for (const auto &snapshot : snapshots)
+		applyNetworkSnapshot(snapshot);
+}
+
+void GameLayer::applyNetworkCommand(const nsv2::network::InputCommand &command)
+{
+	if (command.playerSlot >= _CharacterArray.size())
+		return;
+	auto *character = _CharacterArray[command.playerSlot];
+	if (!character)
+		return;
+	if (command.action == nsv2::network::ActionType::Move)
+	{
+		const Vec2 direction(command.axisX / 1000.0f, command.axisY / 1000.0f);
+		if (direction.x == 0.0f && direction.y == 0.0f)
+			character->idle();
+		else
+			character->walk(direction);
+	}
+	else if (command.action == nsv2::network::ActionType::NormalAttack)
+	{
+		character->attack(NAttack);
+	}
+}
+
+void GameLayer::applyNetworkSnapshot(const nsv2::network::StateSnapshot &snapshot)
+{
+	if (snapshot.matchId != nsv2::network::sharedLanSession().matchConfig().matchId)
+		return;
+	for (const auto &state : snapshot.characters)
+	{
+		if (state.slot == _networkLocalSlot || state.slot >= _CharacterArray.size())
+			continue;
+		auto *character = _CharacterArray[state.slot];
+		if (!character)
+			continue;
+		character->setPosition(Vec2(state.x / 100.0f, state.y / 100.0f));
+		character->setFlipX(state.flipped);
+		character->setHP(state.hp);
+		character->setCKR(state.ckr);
+	}
+}
+
 void GameLayer::JoyStickRelease()
 {
+	if (_networkBattle)
+	{
+		nsv2::network::InputCommand command;
+		command.tick = _networkTick;
+		command.action = nsv2::network::ActionType::Move;
+		nsv2::network::sharedLanSession().submitInput(command);
+		return;
+	}
 	if (currentPlayer->getState() == State::WALK)
 	{
 		currentPlayer->idle();
@@ -677,6 +787,16 @@ void GameLayer::JoyStickRelease()
 
 void GameLayer::JoyStickUpdate(Vec2 direction)
 {
+	if (_networkBattle)
+	{
+		nsv2::network::InputCommand command;
+		command.tick = _networkTick;
+		command.action = nsv2::network::ActionType::Move;
+		command.axisX = static_cast<int16_t>(MAX(-1000.0f, MIN(1000.0f, direction.x * 1000.0f)));
+		command.axisY = static_cast<int16_t>(MAX(-1000.0f, MIN(1000.0f, direction.y * 1000.0f)));
+		nsv2::network::sharedLanSession().submitInput(command);
+		return;
+	}
 	if (!ougisChar)
 	{
 		// CCLOG("x:%f,y:%f",direction.x,direction.y);
@@ -686,6 +806,16 @@ void GameLayer::JoyStickUpdate(Vec2 direction)
 
 void GameLayer::attackButtonClick(ABType type)
 {
+	if (_networkBattle)
+	{
+		if (type != NAttack)
+			return;
+		nsv2::network::InputCommand command;
+		command.tick = _networkTick;
+		command.action = nsv2::network::ActionType::NormalAttack;
+		nsv2::network::sharedLanSession().submitInput(command);
+		return;
+	}
 	if (type == NAttack)
 	{
 		_isAttackButtonRelease = false;
@@ -812,6 +942,8 @@ void GameLayer::onGameOver(bool isWin)
 
 void GameLayer::onLeft()
 {
+	if (_networkBattle)
+		nsv2::network::sharedLanSession().stop();
 	CCNotificationCenter::sharedNotificationCenter()->purgeNotificationCenter();
 
 	CCArray *childArray = getChildren();

@@ -343,6 +343,8 @@ void LoadLayer::onLoadFinish(float dt)
 	_hudLayer = HudLayer::create();
 
 	_gameLayer = GameLayer::create();
+	if (_networkBattle)
+		_gameLayer->enableNetworkBattle(_networkLocalSlot);
 	_gameLayer->setHudLayer(_hudLayer);
 	_gameLayer->setTotalKills(0);
 	_gameLayer->setTotalTime(0);

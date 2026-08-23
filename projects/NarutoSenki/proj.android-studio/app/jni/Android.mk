@@ -1,5 +1,3 @@
-LOCAL_PATH := $(call my-dir)
-
 include $(CLEAR_VARS)
 
 LOCAL_MODULE := cocos2dcpp_shared
@@ -9,7 +7,7 @@ LOCAL_MODULE_FILENAME := libcocos2dcpp
 COCOS_ROOT := $(LOCAL_PATH)/../../../../../
 
 LOCAL_SRC_FILES := narutosenki/main.cpp \
-	    ../../../Classes/AppDelegate.cpp \
+		../../../Classes/AppDelegate.cpp \
 		../../../Classes/ActionButton.cpp \
 		../../../Classes/CharacterBase.cpp \
 		../../../Classes/BGLayer.cpp \
@@ -27,18 +25,24 @@ LOCAL_SRC_FILES := narutosenki/main.cpp \
 		../../../Classes/PauseLayer.cpp \
 		../../../Classes/SelectLayer.cpp \
 		../../../Classes/StartMenu.cpp \
+		../../../Classes/Network/LanProtocol.cpp \
+		../../../Classes/Network/LanTransport.cpp \
+		../../../Classes/Network/LanDiscovery.cpp \
+		../../../Classes/Network/LanSession.cpp \
+		../../../Classes/Network/LanNetworkRuntime.cpp \
+		../../../Classes/Network/NetworkLobbyLayer.cpp \
 		../../../Classes/MyUtils/CCScrewLayer.cpp \
 		../../../Classes/MyUtils/CCShake.cpp \
 		../../../Classes/MyUtils/CCStrokeLabel.cpp \
 		../../../Classes/MyUtils/KTools.cpp \
 		../../../Classes/MyUtils/MD5ChecksumDefines.cpp \
 		../../../Classes/UI/GameModeLayer.cpp \
-        ../../../../../external/sqlite3/src/sqlite3.c \
+		../../../../../external/sqlite3/src/sqlite3.c
 
 LOCAL_C_INCLUDES := $(LOCAL_PATH)/../../../Classes \
-					$(LOCAL_PATH)/../../../Classes/Core \
-					$(COCOS_ROOT)/external \
-					$(COCOS_ROOT)/external/sqlite3/src \
+						$(LOCAL_PATH)/../../../Classes/Core \
+						$(COCOS_ROOT)/external \
+						$(COCOS_ROOT)/external/sqlite3/src
 
 LOCAL_WHOLE_STATIC_LIBRARIES += cocos2dx_static
 LOCAL_WHOLE_STATIC_LIBRARIES += cocosdenshion_static

@@ -2,6 +2,7 @@
 #include "GameOver.h"
 #include "GearLayer.h"
 #include "PauseLayer.h"
+#include "Network/LanProtocol.hpp"
 #include "Data/UnitData.h"
 #include <memory>
 
@@ -116,6 +117,11 @@ public:
 	void gearButtonClick(GearType type);
 	void attackButtonRelease();
 
+	void enableNetworkBattle(uint8_t localSlot);
+	void updateNetworkBattle(float dt);
+	void applyNetworkCommand(const nsv2::network::InputCommand &command);
+	void applyNetworkSnapshot(const nsv2::network::StateSnapshot &snapshot);
+
 	void JoyStickRelease();
 	void JoyStickUpdate(Vec2 direction);
 
@@ -202,6 +208,10 @@ private:
 
 	bool isHUDInitialized = false;
 	bool is4V4Mode = false;
+	bool _networkBattle = false;
+	uint8_t _networkLocalSlot = 0;
+	uint32_t _networkTick = 0;
+	float _networkAccumulator = 0.0f;
 	vector<OnHUDInitializedCallback> callbackssList;
 
 	std::unique_ptr<BattleRuntimeSystem> _battleRuntimeSystem;

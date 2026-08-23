@@ -3,6 +3,7 @@
 #include "GameLayer.h"
 #include "LoadLayer.h"
 #include "SelectLayer.h"
+#include "Network/LanProtocol.hpp"
 
 class IGameModeHandler;
 
@@ -123,6 +124,31 @@ public:
 		}
 	}
 	inline const vector<HeroData> &getHerosArray() { return heroDataVector; }
+
+	// Builds a deterministic two-player roster supplied by the LAN host.
+	void initNetworkHeros(const nsv2::network::MatchConfig &config, uint8_t localSlot)
+	{
+		clearHeroArray();
+		gd = {};
+		gd.enableGear = config.enableGear;
+		gd.isHardCore = !config.enableGear;
+		gd.isRandomChar = false;
+		gd.use4v4SpawnLayout = false;
+		for (const auto &slot : config.slots)
+		{
+			if (slot.heroName.empty())
+				continue;
+			const auto group = static_cast<Group>(slot.group);
+			const auto role = slot.slot == localSlot ? Role::Player : Role::Com;
+			heroDataVector.push_back({slot.heroName, role, group});
+			heroVector.push_back(slot.heroName);
+			if (slot.slot == localSlot)
+			{
+				gd.playerGroup = group;
+				playerGroup = group;
+			}
+		}
+	}
 
 protected:
 	// IGameModeHandler()

@@ -202,20 +202,31 @@ void HudLayer::playGameOpeningAnimation()
 {
 	Vector<SpriteFrame *> spriteFrames;
 	int i = 1;
-	while (i < kComCount)
+	while (i <= 8)
 	{
 		auto frame = getSpriteFrame("gameStart_00{}.png", i);
-		spriteFrames.pushBack(frame);
+		if (frame)
+			spriteFrames.pushBack(frame);
 		i += 1;
 	}
+
+	if (spriteFrames.empty())
+		return;
 
 	auto tempAnimation = Animation::createWithSpriteFrames(spriteFrames, 0.1f);
 	auto tempAction = Animate::create(tempAnimation);
 
-	openingSprite = Sprite::createWithSpriteFrameName("gameStart_001.png");
-	openingSprite->setPosition(Vec2(winSize.width / 2 + 32, winSize.height / 2));
-	addChild(openingSprite, 5000);
-	openingSprite->runAction(tempAction);
+	auto firstFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("gameStart_001.png");
+	if (firstFrame)
+	{
+		openingSprite = Sprite::createWithSpriteFrame(firstFrame);
+		if (openingSprite)
+		{
+			openingSprite->setPosition(Vec2(winSize.width / 2 + 32, winSize.height / 2));
+			addChild(openingSprite, 5000);
+			openingSprite->runAction(tempAction);
+		}
+	}
 }
 
 void HudLayer::initHeroInterface()

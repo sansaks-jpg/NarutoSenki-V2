@@ -91,6 +91,10 @@ void LoadLayer::preloadIMG()
 	addSprites("Select.plist");
 	addSprites("Map.plist");
 	addSprites("Gears.plist");
+	addSprites("Ougis.plist");
+	addSprites("Ougis2.plist");
+	addSprites("Report.plist");
+	addSprites("Result.plist");
 
 	auto herosDataVector = getGameModeHandler()->getHerosArray();
 	int count = herosDataVector.size();

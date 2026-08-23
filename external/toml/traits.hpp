@@ -280,13 +280,17 @@ using enable_if_t = typename std::enable_if<B, T>::type;
 // ---------------------------------------------------------------------------
 // return_type_of_t
 
-#if __cplusplus >= 201703L
+// NDK r17c can report C++17/experimental C++20 mode while its bundled
+// libc++ does not provide std::invoke_result_t. Prefer invoke_result only
+// when the library advertises the C++17 invocability helpers; otherwise use
+// the C++11-compatible result_of implementation.
+#if __cplusplus >= 201703L && defined(__cpp_lib_is_invocable)
 
 template<typename F, typename ... Args>
 using return_type_of_t = std::invoke_result_t<F, Args...>;
 
 #else
-// result_of is deprecated after C++17
+
 template<typename F, typename ... Args>
 using return_type_of_t = typename std::result_of<F(Args...)>::type;
 

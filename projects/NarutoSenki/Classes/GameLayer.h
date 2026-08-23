@@ -154,8 +154,10 @@ public:
 	void onLeft();
 
 	bool _isSurrender;
+	bool _gameOverShown;
 
 	bool _enableGear;
+
 	bool _isOugis2Game;
 	bool _isHardCoreGame;
 	bool _isRandomChar;

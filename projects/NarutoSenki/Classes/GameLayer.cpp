@@ -108,6 +108,7 @@ GameLayer::GameLayer()
 
 	_isShacking = false;
 	_isSurrender = false;
+	_gameOverShown = false;
 	_hasSpawnedGuardian = false;
 
 	_isStarted = false;
@@ -909,7 +910,15 @@ void GameLayer::onGear()
 
 void GameLayer::onGameOver(bool isWin)
 {
+	if (_gameOverShown)
+		return;
+	_gameOverShown = true;
 	removeKeyEventHandler();
+	if (_networkBattle)
+	{
+		nsv2::network::sharedLanSession().stop();
+		_networkBattle = false;
+	}
 
 	if (_isPause)
 	{

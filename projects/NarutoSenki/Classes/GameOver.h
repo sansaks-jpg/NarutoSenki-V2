@@ -15,6 +15,7 @@ public:
 	PROP(bool, _isWin, Win);
 
 	Layer *exitLayer = nullptr;
+	bool _isLeaving = false;
 	Layer *cheatLayer = nullptr;
 	Sprite *result_bg = nullptr;
 

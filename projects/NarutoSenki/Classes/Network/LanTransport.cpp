@@ -1,7 +1,9 @@
 #include "LanTransport.hpp"
 
 #include <cerrno>
+#include <chrono>
 #include <cstring>
+#include <thread>
 
 #if defined(_WIN32)
 #define NOMINMAX
@@ -299,7 +301,11 @@ void LanTransport::workerLoop()
         const int ready = select(socket + 1, &readSet, nullptr, nullptr, &timeout);
 #endif
         if (ready <= 0 || !FD_ISSET(socket, &readSet))
+        {
+            if (ready == 0)
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
             continue;
+        }
 
         uint8_t buffer[65535];
         sockaddr_in source{};

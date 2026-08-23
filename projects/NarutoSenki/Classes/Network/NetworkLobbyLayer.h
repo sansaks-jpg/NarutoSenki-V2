@@ -19,6 +19,7 @@ public:
 
     bool init() override;
     void update(float dt) override;
+    void keyBackClicked() override;
 
     void onHost(Ref *sender);
     void onJoin(Ref *sender);
@@ -61,4 +62,5 @@ private:
     CCLabelTTF *_roomLabel = nullptr;
     int _frameCounter = 0;
     bool _battleEntered = false;
+    bool _leavingNetwork = false;
 };

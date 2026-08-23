@@ -1,6 +1,7 @@
 #include "NetworkLobbyLayer.h"
 #include "GameMode/GameModeImpl.h"
 #include "LoadLayer.h"
+#include "StartMenu.h"
 
 #include <cstdlib>
 #include <sstream>
@@ -34,6 +35,7 @@ bool NetworkLobbyLayer::init()
     if (!Layer::init())
         return false;
     setTouchEnabled(true);
+    setKeypadEnabled(true);
     scheduleUpdate();
     renderPage();
     return true;
@@ -47,6 +49,7 @@ void NetworkLobbyLayer::onEnter()
 
 void NetworkLobbyLayer::onExit()
 {
+    setKeypadEnabled(false);
     if (!_battleEntered)
         _session->stop();
     _session->stopScan();
@@ -332,11 +335,29 @@ void NetworkLobbyLayer::onJoin(Ref *sender)
 void NetworkLobbyLayer::onBack(Ref *sender)
 {
     (void)sender;
+    if (_leavingNetwork)
+        return;
+
     SimpleAudioEngine::sharedEngine()->playEffect("Audio/Menu/cancel.ogg");
     _session->stop();
     _session->stopScan();
-    _page = Page::Home;
-    renderPage();
+
+    if (_page != Page::Home)
+    {
+        _page = Page::Home;
+        renderPage();
+        return;
+    }
+
+    _leavingNetwork = true;
+    auto startScene = Scene::create();
+    startScene->addChild(StartMenu::create());
+    Director::sharedDirector()->replaceScene(TransitionFade::create(0.5f, startScene));
+}
+
+void NetworkLobbyLayer::keyBackClicked()
+{
+    onBack(nullptr);
 }
 
 void NetworkLobbyLayer::onRefresh(Ref *sender)

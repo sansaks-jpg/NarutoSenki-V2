@@ -28,16 +28,23 @@ public:
     bool isScanning() const { return _scanning; }
 
 private:
+    struct TrackedRoom
+    {
+        RoomAdvertisement room;
+        uint64_t lastSeenMs = 0;
+    };
+
     void sendDiscoveryProbe();
     void handleEvents(const std::vector<TransportEvent> &events);
     bool hasRoom(const std::string &address, uint16_t port) const;
 
     LanTransport _transport;
     RoomAdvertisement _room;
-    std::vector<RoomAdvertisement> _rooms;
+    std::vector<TrackedRoom> _trackedRooms;
     bool _advertising = false;
     bool _scanning = false;
     uint64_t _lastProbeMs = 0;
+    uint64_t _lastAdMs = 0;
 };
 
 } // namespace nsv2::network

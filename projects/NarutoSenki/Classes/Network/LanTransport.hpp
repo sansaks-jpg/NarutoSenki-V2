@@ -58,6 +58,9 @@ public:
     const std::string &remoteAddress() const { return _remoteAddress; }
     uint16_t remotePort() const { return _remotePort; }
 
+    static std::vector<std::string> getBroadcastAddresses();
+    static std::string getLocalIpAddress();
+
 private:
     void workerLoop();
     void pushEvent(TransportEvent event);

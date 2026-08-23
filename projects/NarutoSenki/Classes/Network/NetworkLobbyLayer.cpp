@@ -281,7 +281,7 @@ void NetworkLobbyLayer::renderHomePage()
 
 void NetworkLobbyLayer::renderJoinPage()
 {
-    setMessage("Searching for LAN rooms... or enter host IP manually.");
+    setMessage("Searching for LAN rooms on Wi-Fi... Auto-detecting host room.");
 
     auto panel = Sprite::createWithSpriteFrameName("confirm_bg.png");
     if (panel)
@@ -300,7 +300,7 @@ void NetworkLobbyLayer::renderJoinPage()
     _ipEditBox = CCEditBox::create(CCSize(170, 26), inputBg);
     _ipEditBox->setPosition(Vec2(winSize.width / 2 - 45, winSize.height / 2 + 40));
     _ipEditBox->setText(_savedIpText.c_str());
-    _ipEditBox->setPlaceHolder("192.168.x.x:28765");
+    _ipEditBox->setPlaceHolder("Host IP:28765 (Optional fallback)");
     _ipEditBox->setInputMode(kEditBoxInputModeSingleLine);
     _ipEditBox->setReturnType(kKeyboardReturnTypeGo);
     _ipEditBox->setFont("", 12);
@@ -335,7 +335,7 @@ void NetworkLobbyLayer::updateRoomListUI()
     float roomY = winSize.height / 2 - 5;
     if (_rooms.empty())
     {
-        auto empty = CCLabelTTF::create("Searching for rooms on network... (Host must create room first)", "", 11);
+        auto empty = CCLabelTTF::create("Searching for rooms on Wi-Fi/Hotspot... (Host must tap HOST first)", "", 11);
         empty->setPosition(Vec2(winSize.width / 2, roomY - 15));
         _roomListContainer->addChild(empty, 4);
     }
@@ -348,14 +348,14 @@ void NetworkLobbyLayer::updateRoomListUI()
         {
             const auto &room = _rooms[i];
             std::ostringstream labelText;
-            labelText << room.roomName << " (" << static_cast<int>(room.playerCount) << "/"
-                      << static_cast<int>(room.maxPlayers) << ") " << room.address;
+            labelText << "[ROOM] " << room.roomName << " (" << static_cast<int>(room.playerCount) << "/"
+                      << static_cast<int>(room.maxPlayers) << ")  " << room.address << "  >> TAP TO JOIN <<";
 
-            auto item = makeButton(labelText.str(), CCSize(winSize.width - 90, 24), this, menu_selector(NetworkLobbyLayer::onJoinRoom), 0.42f);
+            auto item = makeButton(labelText.str(), CCSize(winSize.width - 70, 26), this, menu_selector(NetworkLobbyLayer::onJoinRoom), 0.44f);
             item->setTag(static_cast<int>(i));
             item->setPosition(Vec2(winSize.width / 2, roomY));
             roomMenu->addChild(item);
-            roomY -= 25;
+            roomY -= 28;
         }
     }
 }

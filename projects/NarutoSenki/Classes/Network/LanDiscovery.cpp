@@ -37,13 +37,14 @@ bool LanDiscovery::startAdvertising(const RoomAdvertisement &room, std::string *
         _room.port = kDefaultLanPort;
     _advertising = _transport.startHost(kDiscoveryPort, error);
     _scanning = false;
+    _lastAdMs = 0;
     return _advertising;
 }
 
 bool LanDiscovery::startScanning(std::string *error)
 {
     stop();
-    _rooms.clear();
+    _trackedRooms.clear();
     _scanning = _transport.startHost(0, error);
     _advertising = false;
     _lastProbeMs = 0;
@@ -63,8 +64,8 @@ void LanDiscovery::sendDiscoveryProbe()
 
 bool LanDiscovery::hasRoom(const std::string &address, uint16_t port) const
 {
-    return std::any_of(_rooms.begin(), _rooms.end(), [&](const RoomAdvertisement &room) {
-        return room.address == address && room.port == port;
+    return std::any_of(_trackedRooms.begin(), _trackedRooms.end(), [&](const TrackedRoom &tr) {
+        return tr.room.address == address && tr.room.port == port;
     });
 }
 
@@ -96,35 +97,77 @@ void LanDiscovery::handleEvents(const std::vector<TransportEvent> &events)
             if (!decodeRoomAdvertisement(event.message.payload, room, &error))
                 continue;
             room.address = event.address;
-            auto existing = std::find_if(_rooms.begin(), _rooms.end(), [&](const RoomAdvertisement &current) {
-                return current.address == room.address && current.port == room.port;
+            if (room.roomName.empty())
+                room.roomName = "Naruto Senki Room";
+
+            const uint64_t now = nowMs();
+            auto existing = std::find_if(_trackedRooms.begin(), _trackedRooms.end(), [&](const TrackedRoom &tr) {
+                return tr.room.address == room.address && tr.room.port == room.port;
             });
-            if (existing == _rooms.end())
-                _rooms.push_back(std::move(room));
+            if (existing == _trackedRooms.end())
+            {
+                _trackedRooms.push_back({std::move(room), now});
+            }
             else
-                *existing = std::move(room);
+            {
+                existing->room = std::move(room);
+                existing->lastSeenMs = now;
+            }
         }
     }
 }
 
 void LanDiscovery::poll(std::vector<RoomAdvertisement> &rooms)
 {
-    if (_scanning && nowMs() - _lastProbeMs >= 1000)
+    const uint64_t now = nowMs();
+
+    // Broadcast room presence regularly while hosting
+    if (_advertising && (now - _lastAdMs >= 1000))
+    {
+        Message adMsg;
+        adMsg.type = MessageType::RoomAdvertise;
+        std::string error;
+        if (encodeRoomAdvertisement(_room, adMsg.payload, &error))
+        {
+            std::string ignored;
+            _transport.broadcast(adMsg, kDiscoveryPort, &ignored);
+        }
+        _lastAdMs = now;
+    }
+
+    // Send discovery probes regularly while scanning
+    if (_scanning && (now - _lastProbeMs >= 600))
+    {
         sendDiscoveryProbe();
+    }
 
     std::vector<TransportEvent> events;
     _transport.poll(events);
     handleEvents(events);
-    rooms = _rooms;
+
+    // Clean up stale rooms (older than 4 seconds)
+    if (_scanning)
+    {
+        _trackedRooms.erase(
+            std::remove_if(_trackedRooms.begin(), _trackedRooms.end(),
+                           [now](const TrackedRoom &tr) { return (now - tr.lastSeenMs) > 4000; }),
+            _trackedRooms.end());
+
+        rooms.clear();
+        rooms.reserve(_trackedRooms.size());
+        for (const auto &tr : _trackedRooms)
+            rooms.push_back(tr.room);
+    }
 }
 
 void LanDiscovery::stop()
 {
     _transport.stop();
-    _rooms.clear();
+    _trackedRooms.clear();
     _advertising = false;
     _scanning = false;
     _lastProbeMs = 0;
+    _lastAdMs = 0;
 }
 
 } // namespace nsv2::network

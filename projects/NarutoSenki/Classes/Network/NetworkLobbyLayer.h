@@ -64,7 +64,7 @@ private:
     std::vector<nsv2::network::RoomAdvertisement> _rooms;
     std::string _message;
     std::string _roomsFingerprint;
-    std::string _savedIpText = "127.0.0.1:28765";
+    std::string _savedIpText = "";
     nsv2::network::SessionState _lastSessionState = nsv2::network::SessionState::Idle;
     cocos2d::extension::CCEditBox *_ipEditBox = nullptr;
     Node *_roomListContainer = nullptr;

@@ -1,17 +1,22 @@
 #include "LanTransport.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <thread>
 
 #if defined(_WIN32)
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <sys/select.h>
 #include <sys/socket.h>
@@ -265,9 +270,144 @@ bool LanTransport::send(const Message &message, const std::string &address,
     return sendRaw(bytes, targetAddress, targetPort, error);
 }
 
+std::vector<std::string> LanTransport::getBroadcastAddresses()
+{
+    std::vector<std::string> targets;
+    targets.push_back("255.255.255.255");
+#if defined(_WIN32)
+    char hostname[256] = {};
+    if (gethostname(hostname, sizeof(hostname)) == 0)
+    {
+        hostent *host = gethostbyname(hostname);
+        if (host && host->h_addr_list)
+        {
+            for (int i = 0; host->h_addr_list[i] != nullptr; ++i)
+            {
+                in_addr addr;
+                memcpy(&addr, host->h_addr_list[i], sizeof(in_addr));
+                char ipBuf[INET_ADDRSTRLEN] = {};
+                if (inet_ntop(AF_INET, &addr, ipBuf, sizeof(ipBuf)))
+                {
+                    std::string ipStr(ipBuf);
+                    size_t lastDot = ipStr.rfind('.');
+                    if (lastDot != std::string::npos)
+                    {
+                        std::string subnetBcast = ipStr.substr(0, lastDot) + ".255";
+                        if (std::find(targets.begin(), targets.end(), subnetBcast) == targets.end())
+                            targets.push_back(subnetBcast);
+                    }
+                }
+            }
+        }
+    }
+#else
+    struct ifaddrs *ifaddr = nullptr;
+    if (getifaddrs(&ifaddr) != -1)
+    {
+        for (struct ifaddrs *ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next)
+        {
+            if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET)
+                continue;
+            if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK) != 0)
+                continue;
+            if (ifa->ifa_flags & IFF_BROADCAST)
+            {
+                if (ifa->ifa_broadaddr && ifa->ifa_broadaddr->sa_family == AF_INET)
+                {
+                    char buf[INET_ADDRSTRLEN] = {};
+                    auto *sin = reinterpret_cast<struct sockaddr_in *>(ifa->ifa_broadaddr);
+                    if (inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf)))
+                    {
+                        std::string addrStr(buf);
+                        if (std::find(targets.begin(), targets.end(), addrStr) == targets.end())
+                            targets.push_back(addrStr);
+                    }
+                }
+            }
+        }
+        freeifaddrs(ifaddr);
+    }
+#endif
+    static const char *fallbackSubnets[] = {"192.168.43.255", "192.168.1.255", "192.168.0.255", "10.0.2.255"};
+    for (const char *fb : fallbackSubnets)
+    {
+        if (std::find(targets.begin(), targets.end(), fb) == targets.end())
+            targets.push_back(fb);
+    }
+    return targets;
+}
+
+std::string LanTransport::getLocalIpAddress()
+{
+#if defined(_WIN32)
+    char hostname[256] = {};
+    if (gethostname(hostname, sizeof(hostname)) == 0)
+    {
+        hostent *host = gethostbyname(hostname);
+        if (host && host->h_addr_list)
+        {
+            for (int i = 0; host->h_addr_list[i] != nullptr; ++i)
+            {
+                in_addr addr;
+                memcpy(&addr, host->h_addr_list[i], sizeof(in_addr));
+                char ipBuf[INET_ADDRSTRLEN] = {};
+                if (inet_ntop(AF_INET, &addr, ipBuf, sizeof(ipBuf)))
+                {
+                    std::string ipStr(ipBuf);
+                    if (ipStr != "127.0.0.1" && !ipStr.empty())
+                        return ipStr;
+                }
+            }
+        }
+    }
+#else
+    struct ifaddrs *ifaddr = nullptr;
+    if (getifaddrs(&ifaddr) != -1)
+    {
+        for (struct ifaddrs *ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next)
+        {
+            if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET)
+                continue;
+            if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK) != 0)
+                continue;
+            char buf[INET_ADDRSTRLEN] = {};
+            auto *sin = reinterpret_cast<struct sockaddr_in *>(ifa->ifa_addr);
+            if (inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf)))
+            {
+                std::string ipStr(buf);
+                if (ipStr != "127.0.0.1" && !ipStr.empty())
+                {
+                    freeifaddrs(ifaddr);
+                    return ipStr;
+                }
+            }
+        }
+        freeifaddrs(ifaddr);
+    }
+#endif
+    return "127.0.0.1";
+}
+
 bool LanTransport::broadcast(const Message &message, uint16_t discoveryPort, std::string *error)
 {
-    return send(message, "255.255.255.255", discoveryPort, error);
+    std::vector<uint8_t> bytes;
+    if (!encodeMessage(message, bytes, error))
+        return false;
+
+    const auto targets = getBroadcastAddresses();
+    bool anySuccess = false;
+    for (const auto &target : targets)
+    {
+        std::string err;
+        if (sendRaw(bytes, target, discoveryPort, &err))
+            anySuccess = true;
+    }
+    if (!anySuccess)
+    {
+        setError(error, "broadcast sendto failed");
+        return false;
+    }
+    return true;
 }
 
 void LanTransport::pushEvent(TransportEvent event)

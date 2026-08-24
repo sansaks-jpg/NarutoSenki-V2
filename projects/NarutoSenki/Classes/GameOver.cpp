@@ -19,6 +19,7 @@ GameOver::~GameOver()
 bool GameOver::init(RenderTexture *snapshoot)
 {
 	RETURN_FALSE_IF(!Layer::init());
+	RETURN_FALSE_IF(!snapshoot);
 
 	SimpleAudioEngine::sharedEngine()->stopAllEffects();
 	SimpleAudioEngine::sharedEngine()->stopBackgroundMusic(true);
@@ -64,13 +65,17 @@ bool GameOver::init(RenderTexture *snapshoot)
 
 void GameOver::listResult()
 {
-	if (getGameLayer()->_isHardCoreGame)
+	auto gameLayer = getGameLayer();
+	if (!gameLayer || !gameLayer->currentPlayer)
+		return;
+
+	if (gameLayer->_isHardCoreGame)
 		SimpleAudioEngine::sharedEngine()->playEffect("Audio/Menu/battle_over1.ogg");
 
 	else
 		SimpleAudioEngine::sharedEngine()->playEffect("Audio/Menu/battle_over.ogg");
 
-	auto currPlayer = getGameLayer()->currentPlayer;
+	auto currPlayer = gameLayer->currentPlayer;
 	auto half = Sprite::createWithSpriteFrameName(format("{}_half.png", currPlayer->getName()).c_str());
 
 	if (currPlayer->getName() == HeroEnum::Konan ||
@@ -102,53 +107,44 @@ void GameOver::listResult()
 	list_bg->setPosition(Vec2(winSize.width / 2 - result_bg->getContentSize().width / 2 + 2, result_bg->getPositionY() - result_bg->getContentSize().height / 2 + 26));
 	addChild(list_bg, 5);
 
-	int _hour = getGameLayer()->_minute / 60;
-	int _minute = getGameLayer()->_minute % 60;
+	int _hour = gameLayer->_minute / 60;
+	int _minute = gameLayer->_minute % 60;
 
 	auto timeBG = Sprite::createWithSpriteFrameName("time_bg.png");
 	timeBG->setAnchorPoint(Vec2(0, 0));
 	timeBG->setPosition(Vec2(winSize.width / 2 + result_bg->getContentSize().width / 2 - 11 - timeBG->getContentSize().width, result_bg->getPositionY() - result_bg->getContentSize().height / 2 + 46));
 	addChild(timeBG, 6);
 
-	auto tempTime = format("{:02d}:{:02d}:{:02d}", _hour, _minute, getGameLayer()->_second);
+	auto tempTime = format("{:02d}:{:02d}:{:02d}", _hour, _minute, gameLayer->_second);
 	auto gameClock = CCLabelBMFont::create(tempTime.c_str(), Fonts::Default);
 	gameClock->setAnchorPoint(Vec2(0.5f, 0));
 	gameClock->setPosition(Vec2(timeBG->getPositionX() + timeBG->getContentSize().width / 2, timeBG->getPositionY() + 3));
 	gameClock->setScale(0.48f);
 	addChild(gameClock, 7);
 
-	uint32_t _totalSecond = getGameLayer()->_minute * 60 + getGameLayer()->_second;
+	uint32_t _totalSecond = gameLayer->_minute * 60 + gameLayer->_second;
 	float resultScore = 0;
-	uint32_t killDead = currPlayer->getKillNum() - currPlayer->_deadNum;
+	int32_t killDead = static_cast<int32_t>(currPlayer->getKillNum()) - static_cast<int32_t>(currPlayer->_deadNum);
 
-	// Verify that the game time is valid
-	if (_totalSecond != getGameLayer()->getTotalTime())
-	{
-		SimpleAudioEngine::sharedEngine()->stopBackgroundMusic(true);
-		Director::sharedDirector()->end();
-		return;
-	}
+	// The display counter can lag the monotonic counter by one scheduler tick.
+	if (_totalSecond != gameLayer->getTotalTime())
+		_totalSecond = gameLayer->getTotalTime();
 
-	if (getGameLayer()->_isHardCoreGame)
+	float totalMinutes = std::max(1.0f / 60.0f, _totalSecond / 60.0f);
+
+	if (gameLayer->_isHardCoreGame)
 	{
 		if (_totalSecond > 900)
-			resultScore = ((killDead / (_totalSecond / 60.0f)) / 3) * 100;
+			resultScore = ((killDead / totalMinutes) / 3.0f) * 100.0f;
 		else
-			resultScore = ((killDead - ((_totalSecond / 60.0f - 15) * 3)) / 45) * 100;
+			resultScore = ((killDead - ((totalMinutes - 15.0f) * 3.0f)) / 45.0f) * 100.0f;
 	}
 	else
 	{
 		if (_totalSecond > 600)
-			resultScore = ((killDead / (_totalSecond / 60.0f)) / 4) * 100;
+			resultScore = ((killDead / totalMinutes) / 4.0f) * 100.0f;
 		else
-			resultScore = ((killDead - ((_totalSecond / 60.0f - 10) * 4)) / 40) * 100;
-	}
-
-	if (_totalSecond < 1 * 60 + 5 && _isWin)
-	{
-		SimpleAudioEngine::sharedEngine()->stopBackgroundMusic(true);
-		Director::sharedDirector()->end();
-		return;
+			resultScore = ((killDead - ((totalMinutes - 10.0f) * 4.0f)) / 40.0f) * 100.0f;
 	}
 
 	int i = 0;
@@ -157,6 +153,9 @@ void GameOver::listResult()
 
 	for (auto hero : getGameLayer()->_CharacterArray)
 	{
+		if (!hero)
+			continue;
+
 		if (hero->isClone() ||
 			hero->isSummon() ||
 			hero->isKugutsu() ||
@@ -411,6 +410,9 @@ void GameOver::listResult()
 
 					for (auto hero : getGameLayer()->_CharacterArray)
 					{
+						if (!hero)
+							continue;
+
 						if (hero->isClone() ||
 							hero->isPlayer() ||
 							hero->isSummon() ||
@@ -475,7 +477,7 @@ void GameOver::listResult()
 	overMenu->setPosition(Vec2(winSize.width / 2 + result_bg->getContentSize().width / 2 - 12, winSize.height / 2 + result_bg->getContentSize().height / 2 - 18));
 	addChild(overMenu, 7);
 
-	getGameLayer()->_isSurrender = false;
+	gameLayer->_isSurrender = false;
 
 	getGameModeHandler()->onGameOver();
 }
@@ -519,9 +521,14 @@ void GameOver::onBackToMenu(Ref *sender)
 
 void GameOver::onLeft(Ref *sender)
 {
+	(void)sender;
+	if (_isLeaving)
+		return;
+	_isLeaving = true;
 	SimpleAudioEngine::sharedEngine()->playEffect("Audio/Menu/confirm.ogg");
 
-	getGameLayer()->_isExiting = true;
+	if (getGameLayer())
+		getGameLayer()->_isExiting = true;
 	Director::sharedDirector()->popScene();
 }
 

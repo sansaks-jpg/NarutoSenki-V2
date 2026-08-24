@@ -230,20 +230,31 @@ GearLayer::GearLayer()
 
 GearLayer::~GearLayer()
 {
-	getGameLayer()->_isGear = false;
+	auto *gameLayer = getGameLayer();
+	if (gameLayer)
+		gameLayer->_isGear = false;
 }
 
 bool GearLayer::init(RenderTexture *snapshoot)
 {
 	RETURN_FALSE_IF(!Layer::init());
 
-	SimpleAudioEngine::sharedEngine()->stopAllEffects();
+	auto *gameLayer = getGameLayer();
+	const bool isNet = gameLayer && gameLayer->isNetworkBattle();
 
-	Texture2D *bgTexture = snapshoot->getSprite()->getTexture();
-	Sprite *bg = Sprite::createWithTexture(bgTexture);
-	bg->setAnchorPoint(Vec2(0, 0));
-	bg->setFlipY(true);
-	addChild(bg, 0);
+	if (!isNet)
+	{
+		SimpleAudioEngine::sharedEngine()->stopAllEffects();
+	}
+
+	if (snapshoot && snapshoot->getSprite())
+	{
+		Texture2D *bgTexture = snapshoot->getSprite()->getTexture();
+		Sprite *bg = Sprite::createWithTexture(bgTexture);
+		bg->setAnchorPoint(Vec2(0, 0));
+		bg->setFlipY(true);
+		addChild(bg, 0);
+	}
 
 	Layer *blend = LayerColor::create(ccc4(0, 0, 0, 150), winSize.width, winSize.height);
 	addChild(blend, 1);
@@ -316,10 +327,22 @@ void GearLayer::confirmPurchase()
 
 void GearLayer::onResume(Ref *sender)
 {
-	getGameLayer()->getHudLayer()->updateGears();
-	Director::sharedDirector()->popScene();
+	auto *gameLayer = getGameLayer();
+	if (gameLayer && gameLayer->getHudLayer())
+		gameLayer->getHudLayer()->updateGears();
 
-	getGameLayer()->_isGear = false;
+	if (gameLayer && gameLayer->isNetworkBattle())
+	{
+		gameLayer->_isGear = false;
+		gameLayer->_gearLayer = nullptr;
+		removeFromParent();
+	}
+	else
+	{
+		Director::sharedDirector()->popScene();
+		if (gameLayer)
+			gameLayer->_isGear = false;
+	}
 }
 
 void GearLayer::onGearBuy(Ref *sender)

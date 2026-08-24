@@ -14,6 +14,8 @@ Audit source tidak menemukan pemanggilan langsung `system()`, `popen()`, `execve
 | Dependency legacy | Cocos2d-x/LuaJIT/prebuilt library tua dapat memiliki vulnerability atau reproducibility rendah. | Pin version/hash, rebuild clean, dan review perubahan dependency. |
 | APK pihak ketiga | APK hasil download dapat berbeda dari source repository. | Jangan install di device utama; verifikasi hash/signature dan permission final APK. |
 | Tidak ada lisensi metadata | Hak redistribusi source/asset tidak jelas. | Pertahankan kredit dan dapatkan izin sebelum publikasi/distribusi. |
+| UDP LAN tanpa backend | Peer pada hotspot yang sama dapat mengirim paket tidak tepercaya. | Validasi magic, protocol version, message type, payload maksimum, match id, slot, action, dan sequence sebelum simulation; jangan menganggap LAN sebagai trust boundary. |
+| Worker/network lifecycle | Socket atau thread yang tertinggal dapat membebani device atau memproses event setelah scene keluar. | LAN bersifat opt-in; worker hanya aktif setelah Host/Join, event diproses di main thread, dan session dihentikan saat Leave/Back/GameOver/timeout/scene exit. |
 
 ## Binary inventory
 
@@ -23,7 +25,7 @@ Repository melacak tool Windows seperti `tools/7z/7z.exe`, `tools/7z/7z.dll`, `t
 
 Gunakan clone bersih dan environment terisolasi. Review `git diff`, hash binary, dan command build sebelum menjalankan. Untuk pertama kali, build tanpa akses network setelah dependency tersedia. Jika Gradle harus mengunduh dependency, gunakan cache/repository yang dipercaya dan catat artifact/version. Jalankan hasil binary pada VM/emulator tanpa data pribadi.
 
-Pada Windows, jangan menjalankan `.exe` dari repository di host utama sebelum memverifikasi provenance. Pada Android, gunakan emulator atau device test tanpa akun/data sensitif. Jika menguji APK, periksa permission, endpoint, certificate, native library, dan perilaku network secara terpisah.
+Pada Windows, jangan menjalankan `.exe` dari repository di host utama sebelum memverifikasi provenance. Pada Android, gunakan emulator atau device test tanpa akun/data sensitif. Jika menguji APK, periksa permission, endpoint, certificate, native library, dan perilaku network secara terpisah. Untuk LAN, uji bahwa mode offline tidak membuka socket/polling, sedangkan Host/Join hanya mengaktifkan UDP setelah dipilih.
 
 ## Secrets dan signing
 
@@ -31,7 +33,7 @@ Jangan menaruh password, token, API key, private key, atau keystore baru di repo
 
 ## Review perubahan berisiko
 
-Perubahan berikut membutuhkan review tambahan: update prebuilt library, perubahan `AndroidManifest.xml`, penambahan permission, perubahan URL/HTTP client, native loading, script loader, Lua encryption/obfuscation, file extraction, process execution, signing config, atau asset yang berasal dari APK pihak ketiga.
+Perubahan berikut membutuhkan review tambahan: update prebuilt library, perubahan `AndroidManifest.xml`, penambahan permission, perubahan URL/HTTP client, raw UDP/discovery, native loading, script loader, Lua encryption/obfuscation, file extraction, process execution, signing config, atau asset yang berasal dari APK pihak ketiga. Perubahan protocol LAN juga harus mempertahankan rejection untuk payload >64 KiB, message type/version tidak dikenal, sequence out-of-order, slot invalid, dan match id tidak cocok.
 
 ## Referensi
 

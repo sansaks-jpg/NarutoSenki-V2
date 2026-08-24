@@ -18,7 +18,7 @@ Dokumentasi lengkap berada di [`docs/README.md`](docs/README.md). Baca dokumen s
 | Roadmap multiplayer | [`docs/multiplayer-roadmap.md`](docs/multiplayer-roadmap.md) |
 | Keamanan dan supply chain | [`docs/security.md`](docs/security.md) |
 
-`AGENTS.md` berisi aturan kerja dan guardrail singkat; detail perilaku project harus ditulis atau diperbarui di dokumen `docs/` terkait. Project ini adalah game 2D Android/desktop berbasis **Cocos2d-x lama yang dikustomisasi**, dengan gameplay utama dalam C++, scripting/UI tertentu dalam Lua, dan resource game khusus. Jangan mengasumsikan bahwa project ini adalah Unity, Godot, atau project modern CMake.
+`AGENTS.md` berisi aturan kerja dan guardrail singkat; detail perilaku project harus ditulis atau diperbarui di dokumen `docs/` terkait. Snapshot branch `feature/lan-hotspot-multiplayer` menyediakan fitur **LAN Hotspot Multiplayer 1v1 Host-Authoritative** lengkap dengan UI bertema Cocos2d-x resmi (`NetworkLobbyLayer`), integrasi layar pemilihan 35 hero ala mode offline (`SelectLayer` grid avatar dengan preview half-portrait + Kanji logo, double-click/OK confirmation), sistem sudut pandang dinamis (POV Mirroring: pemain lokal selalu di sisi kiri 1P Blue vs lawan di sisi kanan 2P Red), sinkronisasi penuh jurus pertempuran (`SKILL1`..`SKILL3`, `OUGIS1`, `OUGIS2`, `Item1`), serta workflow CI/CD otomatis untuk build APK Android rilis (`.github/workflows/release-apk.yml`). Project ini adalah game 2D Android/desktop berbasis **Cocos2d-x lama yang dikustomisasi**, dengan gameplay utama dalam C++, scripting/UI tertentu dalam Lua, dan resource game khusus. Jangan mengasumsikan bahwa project ini adalah Unity, Godot, atau project modern CMake.
 
 ## Tujuan dan batasan umum
 
@@ -30,7 +30,7 @@ Repository publik asal yang menjadi dasar salinan ini adalah `Zx-Akito/NarutoSen
 
 | Path | Peran | Catatan perubahan |
 |---|---|---|
-| `projects/NarutoSenki/Classes` | Source C++ game | Area utama untuk gameplay, scene, UI, mode, unit, dan utilitas game. |
+| `projects/NarutoSenki/Classes` | Source C++ game | Area utama untuk gameplay, scene, UI, mode, unit, utilitas game, dan subsistem LAN di `Classes/Network`. |
 | `projects/NarutoSenki/lua` | Bootstrap dan UI Lua | Berisi `main.lua`, konfigurasi, framework Lua, scene/menu, audio, save, dan utility. |
 | `projects/NarutoSenki/Resources` | Asset runtime | Audio, map, efek, font, UI, unit, konfigurasi, dan metadata gameplay. |
 | `projects/NarutoSenki/proj.android-studio` | Project Android | Gradle + NDK build; menyalin Lua dan Resource ke `app/assets` saat `preBuild`. |
@@ -181,13 +181,13 @@ Untuk karakter baru, tambahkan kelas di `Classes/Core/Shinobi` atau kategori yan
 
 Untuk mode baru, tambahkan enum/data, implementasi `IGameModeHandler`, wiring di `GameModeImpl.h`/`GameModeLayer`, localization di Lua/resource yang relevan, dan test untuk roster/map/win condition. Jangan mengandalkan random default saat menulis test; seed atau expose deterministic setup bila diperlukan.
 
-Untuk rencana multiplayer, jangan menjadikan posisi client sebagai sumber kebenaran. Pisahkan input command dari state snapshot, tetapkan tick/seed, dan pastikan damage, cooldown, projectile, tower, reborn, dan win condition dapat divalidasi server. `CommandSystem`, `GameLayer`, `CharacterBase`, `Hero`, `Projectile/Bullet`, `SpawnSystem`, dan `IGameModeHandler` adalah area utama yang harus ditinjau; menu/lobby saja tidak cukup.
+Untuk multiplayer LAN, jangan menjadikan posisi client sebagai sumber kebenaran. Pisahkan input command dari state snapshot, tetapkan tick/seed, dan pastikan damage, cooldown, projectile, tower, reborn, dan win condition dapat divalidasi host. `LanTransport`/worker harus bebas Cocos2d-x; hanya main thread melalui `LanSession::poll()` yang boleh menyentuh GameLayer atau node. Lifecycle jaringan bersifat opt-in: offline/Training tidak membuat socket dan tidak melakukan polling; Host/Join baru mengaktifkan transport/discovery. Detail ada di [`docs/lan-multiplayer.md`](docs/lan-multiplayer.md) dan [`docs/multiplayer-roadmap.md`](docs/multiplayer-roadmap.md). `CommandSystem`, `GameLayer`, `CharacterBase`, `Hero`, `Projectile/Bullet`, `SpawnSystem`, dan `IGameModeHandler` adalah area utama yang harus ditinjau; menu/lobby saja tidak cukup.
 
 ## Testing dan verifikasi
 
 Repository ini tidak menunjukkan test suite unit/integration yang lengkap. Karena itu, setiap perubahan harus diverifikasi melalui kombinasi build compiler dan smoke test manual. Minimalnya adalah launch ke menu, masuk select layer, mulai satu battle, menguji input gerak/serang/skill, memeriksa audio dan asset, menyelesaikan atau surrender match, lalu kembali ke menu. Untuk perubahan save, periksa record/coin setelah restart. Untuk perubahan platform, uji target yang terdampak; jangan menganggap build Linux membuktikan Android benar.
 
-Untuk perubahan mode atau gameplay, catat setup reproduksi: mode, map, hero, group, gear, seed/random jika ada, dan urutan input. Untuk perubahan resource, periksa case sensitivity path karena Android membedakan huruf besar-kecil.
+Untuk perubahan mode atau gameplay, catat setup reproduksi: mode, map, hero, group, gear, seed/random jika ada, dan urutan input. Untuk perubahan LAN, catat role host/client, alamat/port, hotspot/AP isolation, room state, match id, tick, sequence, dan urutan Host/Join/ready/start/leave. Untuk perubahan resource, periksa case sensitivity path karena Android membedakan huruf besar-kecil.
 
 ## Keamanan repository
 
@@ -211,4 +211,4 @@ Jangan commit hasil generated seperti `app/assets`, `build`, `Debug.win32`, `__B
 
 ## Checklist sebelum menyelesaikan task
 
-Pastikan perubahan berada di source-of-truth yang benar, callback Lua–C++ memakai key terpusat, nama resource dan case path cocok, ownership object aman, build target yang relevan berhasil, smoke test battle dilakukan, `git diff` tidak berisi perubahan tak disengaja, dan tidak ada secret baru yang masuk ke commit. Untuk perubahan multiplayer, tambahkan catatan protokol, tick/seed, state yang disinkronkan, reconnect/timeout, dan strategi deteksi desync.
+Pastikan perubahan berada di source-of-truth yang benar, callback Lua–C++ memakai key terpusat, nama resource dan case path cocok, ownership object aman, build target yang relevan berhasil, smoke test battle dilakukan, `git diff` tidak berisi perubahan tak disengaja, dan tidak ada secret baru yang masuk ke commit. Untuk perubahan multiplayer, tambahkan catatan protokol, tick/seed, state yang disinkronkan, reconnect/timeout, strategi deteksi desync, serta pastikan lifecycle opt-in tidak membebani mode offline. Jalankan test LAN dan verifikasi bahwa worker tetap bebas akses Cocos2d-x.

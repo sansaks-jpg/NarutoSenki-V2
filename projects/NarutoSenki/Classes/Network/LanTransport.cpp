@@ -1,0 +1,547 @@
+#include "LanTransport.hpp"
+
+#include <algorithm>
+#include <cerrno>
+#include <chrono>
+#include <cstring>
+#include <thread>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <sys/ioctl.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
+namespace nsv2::network
+{
+namespace
+{
+#if defined(_WIN32)
+using NativeSocket = SOCKET;
+constexpr NativeSocket kInvalidSocket = INVALID_SOCKET;
+#else
+using NativeSocket = int;
+constexpr NativeSocket kInvalidSocket = -1;
+#endif
+
+NativeSocket nativeSocket(intptr_t value)
+{
+    return static_cast<NativeSocket>(value);
+}
+
+intptr_t socketValue(NativeSocket value)
+{
+    return static_cast<intptr_t>(value);
+}
+
+void closeNativeSocket(NativeSocket socket)
+{
+    if (socket == kInvalidSocket)
+        return;
+#if defined(_WIN32)
+    closesocket(socket);
+#else
+    close(socket);
+#endif
+}
+
+bool wouldBlock()
+{
+#if defined(_WIN32)
+    const int code = WSAGetLastError();
+    return code == WSAEWOULDBLOCK || code == WSAEINTR;
+#else
+    return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR;
+#endif
+}
+
+std::string lastSocketError()
+{
+#if defined(_WIN32)
+    return "socket error " + std::to_string(WSAGetLastError());
+#else
+    return std::strerror(errno);
+#endif
+}
+
+void setError(std::string *error, const std::string &value)
+{
+    if (error)
+        *error = value;
+}
+} // namespace
+
+LanTransport::LanTransport() = default;
+
+LanTransport::~LanTransport()
+{
+    stop();
+}
+
+bool LanTransport::openSocket(uint16_t port, bool enableBroadcast, std::string *error)
+{
+#if defined(_WIN32)
+    WSADATA data;
+    if (WSAStartup(MAKEWORD(2, 2), &data) != 0)
+    {
+        setError(error, "WSAStartup failed");
+        return false;
+    }
+#endif
+
+    NativeSocket socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (socket == kInvalidSocket)
+    {
+        setError(error, "socket(): " + lastSocketError());
+        return false;
+    }
+
+    int reuse = 1;
+    if (setsockopt(socket, SOL_SOCKET, SO_REUSEADDR,
+                   reinterpret_cast<const char *>(&reuse), sizeof(reuse)) != 0)
+    {
+        setError(error, "setsockopt(SO_REUSEADDR): " + lastSocketError());
+        closeNativeSocket(socket);
+        return false;
+    }
+
+    if (enableBroadcast)
+    {
+        int broadcast = 1;
+        if (setsockopt(socket, SOL_SOCKET, SO_BROADCAST,
+                       reinterpret_cast<const char *>(&broadcast), sizeof(broadcast)) != 0)
+        {
+            setError(error, "setsockopt(SO_BROADCAST): " + lastSocketError());
+            closeNativeSocket(socket);
+            return false;
+        }
+    }
+
+    sockaddr_in local{};
+    local.sin_family = AF_INET;
+    local.sin_addr.s_addr = htonl(INADDR_ANY);
+    local.sin_port = htons(port);
+    if (::bind(socket, reinterpret_cast<sockaddr *>(&local), sizeof(local)) != 0)
+    {
+        setError(error, "bind(): " + lastSocketError());
+        closeNativeSocket(socket);
+        return false;
+    }
+
+#if defined(_WIN32)
+    u_long nonBlocking = 1;
+    if (ioctlsocket(socket, FIONBIO, &nonBlocking) != 0)
+#else
+    const int flags = fcntl(socket, F_GETFL, 0);
+    if (flags < 0 || fcntl(socket, F_SETFL, flags | O_NONBLOCK) != 0)
+#endif
+    {
+        setError(error, "non-blocking socket setup failed: " + lastSocketError());
+        closeNativeSocket(socket);
+        return false;
+    }
+
+    sockaddr_in bound{};
+#if defined(_WIN32)
+    int boundLength = sizeof(bound);
+#else
+    socklen_t boundLength = sizeof(bound);
+#endif
+    if (getsockname(socket, reinterpret_cast<sockaddr *>(&bound), &boundLength) == 0)
+        _localPort = ntohs(bound.sin_port);
+    else
+        _localPort = port;
+
+    {
+        std::lock_guard<std::mutex> lock(_socketMutex);
+        _socket = socketValue(socket);
+    }
+    return true;
+}
+
+bool LanTransport::startHost(uint16_t port, std::string *error)
+{
+    stop();
+    _isHost = true;
+    _remoteAddress.clear();
+    _remotePort = 0;
+    if (!openSocket(port, true, error))
+    {
+        _isHost = false;
+        return false;
+    }
+    _running.store(true);
+    _worker = std::thread(&LanTransport::workerLoop, this);
+    pushEvent({TransportEventType::Started, {}, "", _localPort, {}});
+    return true;
+}
+
+bool LanTransport::connectTo(const std::string &address, uint16_t port, std::string *error)
+{
+    if (address.empty() || port == 0)
+    {
+        setError(error, "remote address and port are required");
+        return false;
+    }
+
+    stop();
+    _isHost = false;
+    _remoteAddress = address;
+    _remotePort = port;
+    if (!openSocket(0, false, error))
+    {
+        _remoteAddress.clear();
+        _remotePort = 0;
+        return false;
+    }
+    _running.store(true);
+    _worker = std::thread(&LanTransport::workerLoop, this);
+    pushEvent({TransportEventType::Started, {}, address, port, {}});
+    return true;
+}
+
+bool LanTransport::sendRaw(const std::vector<uint8_t> &bytes, const std::string &address,
+                           uint16_t port, std::string *error)
+{
+    if (bytes.empty())
+    {
+        setError(error, "cannot send empty packet");
+        return false;
+    }
+    if (address.empty() || port == 0)
+    {
+        setError(error, "destination address and port are required");
+        return false;
+    }
+
+    sockaddr_in destination{};
+    destination.sin_family = AF_INET;
+    destination.sin_port = htons(port);
+    if (inet_pton(AF_INET, address.c_str(), &destination.sin_addr) != 1)
+    {
+        setError(error, "destination must be an IPv4 address");
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(_socketMutex);
+    NativeSocket socket = nativeSocket(_socket);
+    if (socket == kInvalidSocket)
+    {
+        setError(error, "transport socket is not open");
+        return false;
+    }
+
+#if defined(_WIN32)
+    const int sent = sendto(socket, reinterpret_cast<const char *>(bytes.data()),
+                            static_cast<int>(bytes.size()), 0,
+                            reinterpret_cast<const sockaddr *>(&destination), sizeof(destination));
+#else
+    const ssize_t sent = sendto(socket, bytes.data(), bytes.size(), 0,
+                                reinterpret_cast<const sockaddr *>(&destination), sizeof(destination));
+#endif
+    if (sent < 0 || static_cast<size_t>(sent) != bytes.size())
+    {
+        setError(error, "sendto(): " + lastSocketError());
+        return false;
+    }
+    return true;
+}
+
+bool LanTransport::send(const Message &message, const std::string &address,
+                        uint16_t port, std::string *error)
+{
+    std::vector<uint8_t> bytes;
+    if (!encodeMessage(message, bytes, error))
+        return false;
+
+    const std::string targetAddress = address.empty() ? _remoteAddress : address;
+    const uint16_t targetPort = port == 0 ? _remotePort : port;
+    return sendRaw(bytes, targetAddress, targetPort, error);
+}
+
+std::vector<std::string> LanTransport::getBroadcastAddresses()
+{
+    std::vector<std::string> targets;
+    targets.push_back("255.255.255.255");
+#if defined(_WIN32)
+    char hostname[256] = {};
+    if (gethostname(hostname, sizeof(hostname)) == 0)
+    {
+        hostent *host = gethostbyname(hostname);
+        if (host && host->h_addr_list)
+        {
+            for (int i = 0; host->h_addr_list[i] != nullptr; ++i)
+            {
+                in_addr addr;
+                memcpy(&addr, host->h_addr_list[i], sizeof(in_addr));
+                char ipBuf[INET_ADDRSTRLEN] = {};
+                if (inet_ntop(AF_INET, &addr, ipBuf, sizeof(ipBuf)))
+                {
+                    std::string ipStr(ipBuf);
+                    size_t lastDot = ipStr.rfind('.');
+                    if (lastDot != std::string::npos)
+                    {
+                        std::string subnetBcast = ipStr.substr(0, lastDot) + ".255";
+                        if (std::find(targets.begin(), targets.end(), subnetBcast) == targets.end())
+                            targets.push_back(subnetBcast);
+                    }
+                }
+            }
+        }
+    }
+#else
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock >= 0)
+    {
+        char buffer[1024] = {};
+        ifconf ifc{};
+        ifc.ifc_len = sizeof(buffer);
+        ifc.ifc_buf = buffer;
+
+        if (ioctl(sock, SIOCGIFCONF, &ifc) == 0)
+        {
+            const ifreq *ifr = ifc.ifc_req;
+            const int count = ifc.ifc_len / sizeof(ifreq);
+            for (int i = 0; i < count; ++i)
+            {
+                ifreq item = ifr[i];
+                if (ioctl(sock, SIOCGIFFLAGS, &item) == 0)
+                {
+                    if ((item.ifr_flags & IFF_UP) && !(item.ifr_flags & IFF_LOOPBACK))
+                    {
+                        ifreq bcastReq = ifr[i];
+                        if (ioctl(sock, SIOCGIFBRDADDR, &bcastReq) == 0)
+                        {
+                            auto *sin = reinterpret_cast<sockaddr_in *>(&bcastReq.ifr_broadaddr);
+                            char ipBuf[INET_ADDRSTRLEN] = {};
+                            if (inet_ntop(AF_INET, &sin->sin_addr, ipBuf, sizeof(ipBuf)))
+                            {
+                                std::string addrStr(ipBuf);
+                                if (!addrStr.empty() && addrStr != "0.0.0.0" &&
+                                    std::find(targets.begin(), targets.end(), addrStr) == targets.end())
+                                {
+                                    targets.push_back(addrStr);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        close(sock);
+    }
+#endif
+    static const char *fallbackSubnets[] = {"192.168.43.255", "192.168.1.255", "192.168.0.255", "10.0.2.255"};
+    for (const char *fb : fallbackSubnets)
+    {
+        if (std::find(targets.begin(), targets.end(), fb) == targets.end())
+            targets.push_back(fb);
+    }
+    return targets;
+}
+
+std::string LanTransport::getLocalIpAddress()
+{
+#if defined(_WIN32)
+    char hostname[256] = {};
+    if (gethostname(hostname, sizeof(hostname)) == 0)
+    {
+        hostent *host = gethostbyname(hostname);
+        if (host && host->h_addr_list)
+        {
+            for (int i = 0; host->h_addr_list[i] != nullptr; ++i)
+            {
+                in_addr addr;
+                memcpy(&addr, host->h_addr_list[i], sizeof(in_addr));
+                char ipBuf[INET_ADDRSTRLEN] = {};
+                if (inet_ntop(AF_INET, &addr, ipBuf, sizeof(ipBuf)))
+                {
+                    std::string ipStr(ipBuf);
+                    if (ipStr != "127.0.0.1" && !ipStr.empty())
+                        return ipStr;
+                }
+            }
+        }
+    }
+#else
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock >= 0)
+    {
+        char buffer[1024] = {};
+        ifconf ifc{};
+        ifc.ifc_len = sizeof(buffer);
+        ifc.ifc_buf = buffer;
+
+        if (ioctl(sock, SIOCGIFCONF, &ifc) == 0)
+        {
+            const ifreq *ifr = ifc.ifc_req;
+            const int count = ifc.ifc_len / sizeof(ifreq);
+            for (int i = 0; i < count; ++i)
+            {
+                ifreq item = ifr[i];
+                if (ioctl(sock, SIOCGIFFLAGS, &item) == 0)
+                {
+                    if ((item.ifr_flags & IFF_UP) && !(item.ifr_flags & IFF_LOOPBACK))
+                    {
+                        auto *sin = reinterpret_cast<sockaddr_in *>(&item.ifr_addr);
+                        char ipBuf[INET_ADDRSTRLEN] = {};
+                        if (inet_ntop(AF_INET, &sin->sin_addr, ipBuf, sizeof(ipBuf)))
+                        {
+                            std::string ipStr(ipBuf);
+                            if (ipStr != "127.0.0.1" && !ipStr.empty() && ipStr != "0.0.0.0")
+                            {
+                                close(sock);
+                                return ipStr;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        close(sock);
+    }
+#endif
+    return "127.0.0.1";
+}
+
+bool LanTransport::broadcast(const Message &message, uint16_t discoveryPort, std::string *error)
+{
+    std::vector<uint8_t> bytes;
+    if (!encodeMessage(message, bytes, error))
+        return false;
+
+    const auto targets = getBroadcastAddresses();
+    bool anySuccess = false;
+    for (const auto &target : targets)
+    {
+        std::string err;
+        if (sendRaw(bytes, target, discoveryPort, &err))
+            anySuccess = true;
+    }
+    if (!anySuccess)
+    {
+        setError(error, "broadcast sendto failed");
+        return false;
+    }
+    return true;
+}
+
+void LanTransport::pushEvent(TransportEvent event)
+{
+    std::lock_guard<std::mutex> lock(_eventMutex);
+    _events.push_back(std::move(event));
+}
+
+void LanTransport::workerLoop()
+{
+    while (_running.load())
+    {
+        NativeSocket socket;
+        {
+            std::lock_guard<std::mutex> lock(_socketMutex);
+            socket = nativeSocket(_socket);
+        }
+        if (socket == kInvalidSocket)
+            break;
+
+        fd_set readSet;
+        FD_ZERO(&readSet);
+        FD_SET(socket, &readSet);
+        timeval timeout{};
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 50000;
+
+#if defined(_WIN32)
+        const int ready = select(0, &readSet, nullptr, nullptr, &timeout);
+#else
+        const int ready = select(socket + 1, &readSet, nullptr, nullptr, &timeout);
+#endif
+        if (ready <= 0 || !FD_ISSET(socket, &readSet))
+        {
+            if (ready == 0)
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            continue;
+        }
+
+        uint8_t buffer[65535];
+        sockaddr_in source{};
+#if defined(_WIN32)
+        int sourceLength = sizeof(source);
+        const int received = recvfrom(socket, reinterpret_cast<char *>(buffer), sizeof(buffer), 0,
+                                      reinterpret_cast<sockaddr *>(&source), &sourceLength);
+#else
+        socklen_t sourceLength = sizeof(source);
+        const ssize_t received = recvfrom(socket, buffer, sizeof(buffer), 0,
+                                          reinterpret_cast<sockaddr *>(&source), &sourceLength);
+#endif
+        if (received <= 0)
+        {
+            if (!wouldBlock())
+                pushEvent({TransportEventType::Error, {}, "", 0, "recvfrom(): " + lastSocketError()});
+            continue;
+        }
+
+        char addressBuffer[INET_ADDRSTRLEN] = {};
+        const char *address = inet_ntop(AF_INET, &source.sin_addr, addressBuffer, sizeof(addressBuffer));
+        Message message;
+        size_t consumed = 0;
+        std::string error;
+        if (!decodeMessage(buffer, static_cast<size_t>(received), message, consumed, &error) ||
+            consumed != static_cast<size_t>(received))
+        {
+            pushEvent({TransportEventType::Error, {}, address ? address : "", ntohs(source.sin_port),
+                       error.empty() ? "invalid datagram" : error});
+            continue;
+        }
+        pushEvent({TransportEventType::Message, std::move(message), address ? address : "",
+                   ntohs(source.sin_port), {}});
+    }
+}
+
+void LanTransport::poll(std::vector<TransportEvent> &events)
+{
+    std::lock_guard<std::mutex> lock(_eventMutex);
+    while (!_events.empty())
+    {
+        events.push_back(std::move(_events.front()));
+        _events.pop_front();
+    }
+}
+
+void LanTransport::stop()
+{
+    _running.store(false);
+    if (_worker.joinable())
+        _worker.join();
+
+    NativeSocket socket;
+    {
+        std::lock_guard<std::mutex> lock(_socketMutex);
+        socket = nativeSocket(_socket);
+        _socket = -1;
+    }
+    if (socket != kInvalidSocket)
+    {
+        closeNativeSocket(socket);
+#if defined(_WIN32)
+        WSACleanup();
+#endif
+    }
+    _localPort = 0;
+    _isHost = false;
+    _remoteAddress.clear();
+    _remotePort = 0;
+}
+
+} // namespace nsv2::network

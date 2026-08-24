@@ -2,12 +2,13 @@
 
 Folder ini berisi dokumentasi terstruktur untuk project NarutoSenki-V2. `AGENTS.md` di root adalah aturan kerja singkat untuk agent dan kontributor; dokumen di sini menyimpan penjelasan arsitektur dan workflow yang lebih lengkap.
 
-> **Status dokumentasi:** dibuat dari inspeksi source tree, konfigurasi build, entry point, UI, mode game, resource, serta sistem runtime pada branch `master`.
+> **Status dokumentasi:** snapshot ini mengikuti implementasi pada branch `feature/lan-hotspot-multiplayer`. Fitur LAN yang didokumentasikan di sini adalah MVP 1v1 host-authoritative berbasis UDP hotspot/LAN; `main`/`master` tidak menjadi target perubahan branch ini.
 
 ## Peta dokumentasi
 
 | Dokumen | Isi utama | Kapan dibaca |
 |---|---|---|
+| [lan-multiplayer.md](lan-multiplayer.md) | Implementasi LAN MVP: Host/Join, discovery/manual IP, lobby, protocol UDP, 1v1 authoritative, lifecycle opt-in, testing, dan batasan. | Saat mengubah atau menguji fitur LAN pada branch ini. |
 | [architecture.md](architecture.md) | Struktur repository, layer engine, C++, Lua, platform, dan dependency. | Sebelum refactor atau menambah subsistem. |
 | [runtime-flow.md](runtime-flow.md) | Urutan startup, scene transition, initialization, battle lifecycle, dan game over. | Saat mengubah startup, scene, loading, atau cleanup. |
 | [ui-workflow.md](ui-workflow.md) | Seluruh layar dan elemen UI yang dapat diklik dari menu sampai battle. | Saat mengubah menu, selection, HUD, pause, atau gear. |
@@ -15,7 +16,7 @@ Folder ini berisi dokumentasi terstruktur untuk project NarutoSenki-V2. `AGENTS.
 | [assets-and-data.md](assets-and-data.md) | Resource atlas, audio, map, metadata unit, parser TOML, SQLite, dan naming. | Saat menambah karakter, skill, map, audio, atau konfigurasi. |
 | [build-and-platforms.md](build-and-platforms.md) | Build Linux, Android, Windows, macOS, iOS, ABI, NDK, Gradle, dan generated assets. | Sebelum build atau memperbaiki error platform. |
 | [development-guide.md](development-guide.md) | Workflow kontribusi, titik extension, debugging, testing manual, dan checklist. | Untuk pekerjaan harian dan code review. |
-| [multiplayer-roadmap.md](multiplayer-roadmap.md) | Rancangan lobby, protocol, deterministic simulation, server authority, dan tahapan implementasi. | Saat mulai mengembangkan online multiplayer. |
+| [multiplayer-roadmap.md](multiplayer-roadmap.md) | Status milestone LAN yang sudah landed dan roadmap internet/server setelah MVP. | Saat merencanakan perluasan multiplayer di luar LAN MVP. |
 | [security.md](security.md) | Risiko supply chain, binary prebuilt, signing key, permission, dan cara menjalankan build secara aman. | Sebelum menjalankan binary atau mendistribusikan APK. |
 | [release-build.md](release-build.md) | GitHub Actions release build, tag, artifact, dan download APK. | Saat menerbitkan APK otomatis. |
 

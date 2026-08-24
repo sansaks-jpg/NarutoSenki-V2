@@ -20,12 +20,21 @@ public:
 	PROP_PTR(HudLayer, _hudLayer, HudLayer);
 
 	bool _isHardCoreMode;
-	bool _enableGear;
+    bool _enableGear;
+    bool _networkBattle = false;
+    uint8_t _networkLocalSlot = 0;
+
+    void configureNetworkBattle(uint8_t localSlot)
+    {
+        _networkBattle = true;
+        _networkLocalSlot = localSlot;
+    }
 
 	void preloadAudio();
 	void preloadIMG();
 	void playBGM(float dt);
 	void onLoadFinish(float dt);
+	void update(float dt) override;
 
 	CREATE_FUNC(LoadLayer);
 	static void perloadCharIMG(const string &name);

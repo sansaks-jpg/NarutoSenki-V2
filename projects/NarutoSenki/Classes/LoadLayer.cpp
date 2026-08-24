@@ -1,5 +1,6 @@
 #include "LoadLayer.h"
 #include "GameMode/GameModeImpl.h"
+#include "Network/LanNetworkRuntime.hpp"
 
 LoadLayer::LoadLayer()
 {
@@ -16,54 +17,85 @@ bool LoadLayer::init()
 	if (!Layer::init())
 		return false;
 
+	addSprites("UI.plist");
+	addSprites("Menu.plist");
+
 	// produce the menu_bar
 	Sprite *menu_bar_b = Sprite::create("menu_bar2.png");
-	menu_bar_b->setAnchorPoint(Vec2(0, 0));
-	FULL_SCREEN_SPRITE(menu_bar_b);
-	addChild(menu_bar_b, 2);
+	if (menu_bar_b)
+	{
+		menu_bar_b->setAnchorPoint(Vec2(0, 0));
+		FULL_SCREEN_SPRITE(menu_bar_b);
+		addChild(menu_bar_b, 2);
+	}
 
 	Sprite *menu_bar_t = Sprite::create("menu_bar3.png");
-	menu_bar_t->setAnchorPoint(Vec2(0, 0));
-	menu_bar_t->setPosition(Vec2(0, winSize.height - menu_bar_t->getContentSize().height));
-	FULL_SCREEN_SPRITE(menu_bar_t);
-	addChild(menu_bar_t, 2);
+	if (menu_bar_t)
+	{
+		menu_bar_t->setAnchorPoint(Vec2(0, 0));
+		menu_bar_t->setPosition(Vec2(0, winSize.height - menu_bar_t->getContentSize().height));
+		FULL_SCREEN_SPRITE(menu_bar_t);
+		addChild(menu_bar_t, 2);
+	}
 
 	Sprite *loading_title = Sprite::createWithSpriteFrameName("loading_title.png");
-	loading_title->setAnchorPoint(Vec2(0, 0));
-	loading_title->setPosition(Vec2(2, winSize.height - loading_title->getContentSize().height - 2));
-	addChild(loading_title, 3);
+	if (loading_title)
+	{
+		loading_title->setAnchorPoint(Vec2(0, 0));
+		loading_title->setPosition(Vec2(2, winSize.height - loading_title->getContentSize().height - 2));
+		addChild(loading_title, 3);
+	}
 
 	// produce the cloud
 	Sprite *cloud_left = Sprite::createWithSpriteFrameName("cloud.png");
-	cloud_left->setPosition(Vec2(0, 15));
-	cloud_left->setFlipX(true);
-	cloud_left->setFlipY(true);
-	cloud_left->setAnchorPoint(Vec2(0, 0));
-	addChild(cloud_left, 1);
+	if (cloud_left)
+	{
+		cloud_left->setPosition(Vec2(0, 15));
+		cloud_left->setFlipX(true);
+		cloud_left->setFlipY(true);
+		cloud_left->setAnchorPoint(Vec2(0, 0));
+		addChild(cloud_left, 1);
 
-	auto cmv1 = MoveBy::create(1, Vec2(-15, 0));
-	auto cseq1 = RepeatForever::create(newSequence(cmv1, cmv1->reverse()));
-	cloud_left->runAction(cseq1);
+		auto cmv1 = MoveBy::create(1, Vec2(-15, 0));
+		auto cseq1 = RepeatForever::create(newSequence(cmv1, cmv1->reverse()));
+		cloud_left->runAction(cseq1);
+	}
 
 	Sprite *cloud_right = Sprite::createWithSpriteFrameName("cloud.png");
-	cloud_right->setPosition(Vec2(winSize.width - cloud_right->getContentSize().width,
-								  winSize.height - (cloud_right->getContentSize().height + 15)));
-	cloud_right->setAnchorPoint(Vec2(0, 0));
-	addChild(cloud_right, 1);
+	if (cloud_right)
+	{
+		cloud_right->setPosition(Vec2(winSize.width - cloud_right->getContentSize().width,
+									  winSize.height - (cloud_right->getContentSize().height + 15)));
+		cloud_right->setAnchorPoint(Vec2(0, 0));
+		addChild(cloud_right, 1);
 
-	auto cmv2 = MoveBy::create(1, Vec2(15, 0));
-	auto cseq2 = RepeatForever::create(newSequence(cmv2, cmv2->reverse()));
-	cloud_right->runAction(cseq2);
+		auto cmv2 = MoveBy::create(1, Vec2(15, 0));
+		auto cseq2 = RepeatForever::create(newSequence(cmv2, cmv2->reverse()));
+		cloud_right->runAction(cseq2);
+	}
 
 	const auto &gd = getGameModeHandler()->getGameData();
 	_enableGear = gd.enableGear;
 	_isHardCoreMode = gd.isHardCore;
 
+	scheduleUpdate();
 	return true;
 }
 
 void LoadLayer::preloadIMG()
 {
+	addSprites("UI.plist");
+	addSprites("Menu.plist");
+	addSprites("NamePlate.plist");
+	addSprites("Record.plist");
+	addSprites("Select.plist");
+	addSprites("Map.plist");
+	addSprites("Gears.plist");
+	addSprites("Ougis.plist");
+	addSprites("Ougis2.plist");
+	addSprites("Report.plist");
+	addSprites("Result.plist");
+
 	auto herosDataVector = getGameModeHandler()->getHerosArray();
 	int count = herosDataVector.size();
 	if (count == 2) // 1v1
@@ -338,11 +370,20 @@ void LoadLayer::preloadAudio()
 
 void LoadLayer::onLoadFinish(float dt)
 {
+	(void)dt;
+	if (_networkBattle)
+	{
+		std::string err;
+		nsv2::network::sharedLanSession().markLoaded(&err);
+	}
+
 	Scene *gameScene = Scene::create();
 
 	_hudLayer = HudLayer::create();
 
 	_gameLayer = GameLayer::create();
+	if (_networkBattle)
+		_gameLayer->enableNetworkBattle(_networkLocalSlot);
 	_gameLayer->setHudLayer(_hudLayer);
 	_gameLayer->setTotalKills(0);
 	_gameLayer->setTotalTime(0);
@@ -359,4 +400,13 @@ void LoadLayer::onLoadFinish(float dt)
 	gameScene->addChild(_hudLayer, kHudLayerOrder);
 
 	Director::sharedDirector()->replaceScene(TransitionFade::create(0.5f, gameScene));
+}
+
+void LoadLayer::update(float dt)
+{
+	(void)dt;
+	if (_networkBattle)
+	{
+		nsv2::network::sharedLanSession().poll();
+	}
 }

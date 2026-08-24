@@ -16,7 +16,18 @@ bool MiniIcon::init(const char *szImage, bool isNotification)
 {
 	RETURN_FALSE_IF(!Sprite::init());
 
-	initWithSpriteFrameName(szImage);
+	if (szImage && strlen(szImage) > 0)
+	{
+		auto frame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(szImage);
+		if (frame)
+		{
+			initWithSpriteFrame(frame);
+		}
+		else
+		{
+			CCLOGERROR("MiniIcon: SpriteFrame '%s' not found in cache", szImage);
+		}
+	}
 
 	if (isNotification)
 	{
@@ -191,20 +202,31 @@ void HudLayer::playGameOpeningAnimation()
 {
 	Vector<SpriteFrame *> spriteFrames;
 	int i = 1;
-	while (i < kComCount)
+	while (i <= 8)
 	{
 		auto frame = getSpriteFrame("gameStart_00{}.png", i);
-		spriteFrames.pushBack(frame);
+		if (frame)
+			spriteFrames.pushBack(frame);
 		i += 1;
 	}
+
+	if (spriteFrames.empty())
+		return;
 
 	auto tempAnimation = Animation::createWithSpriteFrames(spriteFrames, 0.1f);
 	auto tempAction = Animate::create(tempAnimation);
 
-	openingSprite = Sprite::createWithSpriteFrameName("gameStart_001.png");
-	openingSprite->setPosition(Vec2(winSize.width / 2 + 32, winSize.height / 2));
-	addChild(openingSprite, 5000);
-	openingSprite->runAction(tempAction);
+	auto firstFrame = CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName("gameStart_001.png");
+	if (firstFrame)
+	{
+		openingSprite = Sprite::createWithSpriteFrame(firstFrame);
+		if (openingSprite)
+		{
+			openingSprite->setPosition(Vec2(winSize.width / 2 + 32, winSize.height / 2));
+			addChild(openingSprite, 5000);
+			openingSprite->runAction(tempAction);
+		}
+	}
 }
 
 void HudLayer::initHeroInterface()
@@ -480,55 +502,48 @@ void HudLayer::initHeroInterface()
 
 	for (auto tower : getGameLayer()->_TowerArray)
 	{
-		const char *path = "";
-		MiniIcon *mi;
-		if (tower->getGroup() == currentPlayer->getGroup())
-			path = "tower_icon1.png";
-		else
-			path = "tower_icon2.png";
-		mi = MiniIcon::create(path, false);
-		mi->_delegate = miniLayer;
-		miniLayer->addChild(mi);
-		mi->updatePosition(tower->getSpawnPoint());
-		mi->setCharId(tower->getCharId());
-
-		_towerIconArray.push_back(mi);
+		const char *path = (tower->getGroup() == currentPlayer->getGroup()) ? "tower_icon1.png" : "tower_icon2.png";
+		MiniIcon *mi = MiniIcon::create(path, false);
+		if (mi)
+		{
+			mi->_delegate = miniLayer;
+			miniLayer->addChild(mi);
+			mi->updatePosition(tower->getSpawnPoint());
+			mi->setCharId(tower->getCharId());
+			_towerIconArray.push_back(mi);
+		}
 	}
 
 	for (auto player : getGameLayer()->_CharacterArray)
 	{
 		if (player->isPlayerOrCom())
 		{
-			MiniIcon *mi;
-			const char *path = "";
+			const char *path = "enemy_icon.png";
 			if (player->isPlayer())
 			{
 				path = "player_icon.png";
 			}
-			else if (player->isCom())
+			else if (player->isGuardian())
 			{
-				if (player->isGuardian())
-				{
-					path = "guardian_icon.png";
-				}
-				else
-				{
-					if (player->getGroup() == currentPlayer->getGroup())
-					{
-						path = "com_icon.png";
-					}
-					else
-					{
-						path = "enemy_icon.png";
-					}
-				}
+				path = "guardian_icon.png";
+			}
+			else if (player->getGroup() == currentPlayer->getGroup())
+			{
+				path = "com_icon.png";
+			}
+			else
+			{
+				path = "enemy_icon.png";
 			}
 
-			mi = MiniIcon::create(path, true);
-			mi->_delegate = miniLayer;
-			miniLayer->addChild(mi);
-			mi->updatePosition(player->getSpawnPoint());
-			mi->setCharId(player->getCharId());
+			MiniIcon *mi = MiniIcon::create(path, true);
+			if (mi)
+			{
+				mi->_delegate = miniLayer;
+				miniLayer->addChild(mi);
+				mi->updatePosition(player->getSpawnPoint());
+				mi->setCharId(player->getCharId());
+			}
 		}
 	}
 

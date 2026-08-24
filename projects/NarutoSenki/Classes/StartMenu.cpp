@@ -1,4 +1,5 @@
 #include "StartMenu.h"
+#include "Network/NetworkLobbyLayer.h"
 
 GameMode s_GameMode = GameMode::Classic;
 std::array<std::unique_ptr<IGameModeHandler>, GameMode::__Internal_Max_Length> s_ModeHandlers = {
@@ -133,8 +134,9 @@ void MenuButton::ccTouchEnded(Touch *touch, Event *event)
 			break;
 		case MenuButtonType::Custom:
 			SimpleAudioEngine::sharedEngine()->playEffect("Audio/Menu/confirm.ogg");
-			// TODO
+			_startMenu->enterCustomMode();
 			break;
+
 		case MenuButtonType::HardCore:
 			SimpleAudioEngine::sharedEngine()->playEffect(SELECT_SOUND);
 			auto frame = getSpriteFrame("menu05_text.png");
@@ -511,6 +513,14 @@ void StartMenu::onHardLayerCallBack()
 			addChild(hardCoreLayer, 700);
 		}
 	}
+}
+
+void StartMenu::enterCustomMode()
+{
+	auto networkScene = Scene::create();
+	auto networkLayer = NetworkLobbyLayer::create();
+	networkScene->addChild(networkLayer);
+	Director::sharedDirector()->replaceScene(TransitionFade::create(0.75f, networkScene));
 }
 
 void StartMenu::onTrainingCallBack()

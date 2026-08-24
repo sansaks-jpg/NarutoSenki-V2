@@ -660,6 +660,8 @@ protected:
 		return false;
 	}
 	bool checkMove(float x = 32, float y = 32) {
+		if (!_mainTarget)
+			return false;
 		auto sp = getDistanceToTarget();
 		if (abs(sp.x) > x || abs(sp.y) > y)
 		{
@@ -684,14 +686,20 @@ protected:
 		}
 	}
 	Vec2 getDirByMoveTo(CharacterBase *target) {
+		if (!target)
+			return Vec2(0, 0);
 		return (target->getPosition() - getPosition()).getNormalized();
 	}
 	Vec2 getDistanceToTarget() {
+		if (!_mainTarget)
+			return Vec2(0, 0);
 		return _mainTarget->_originY
 			? Vec2(_mainTarget->getPositionX(), _mainTarget->_originY) - getPosition()
 			: _mainTarget->getPosition() - getPosition();
 	}
 	Vec2 getDistanceToTargetAndIgnoreOriginY() {
+		if (!_mainTarget)
+			return Vec2(0, 0);
 		return _mainTarget->getPosition() - getPosition();
 	}
 

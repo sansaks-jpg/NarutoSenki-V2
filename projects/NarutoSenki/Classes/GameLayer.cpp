@@ -5,14 +5,50 @@
 #include "HudLayer.h"
 #include "StartMenu.h"
 #include "Core/Provider.hpp"
+#include "Core/Warrior/Flog.hpp"
+#include "Core/Tower/Tower.hpp"
 #include "GameMode/GameModeImpl.h"
 #include "Constants/UiFlowKeys.hpp"
 #include "Systems/BattleRuntimeSystem.hpp"
 #include "Systems/SpawnSystem.hpp"
 #include "Systems/SessionState.hpp"
+#include "Network/LanNetworkRuntime.hpp"
+#include "Network/AuthoritativeBattleState.hpp"
+#include "Network/NetworkPresentationAdapter.hpp"
+
+#include <set>
 
 GameLayer *_gLayer = nullptr;
 bool _isFullScreen = false;
+
+namespace
+{
+// Network unit-id namespaces shared by both devices.
+constexpr int kNetTowerIdBase = 100;
+constexpr int kNetGuardianId = 200;
+constexpr int kNetFlogIdBase = 300;
+
+// Shared flog-name table used to encode flog mirrors in unit snapshots.
+const char *kNetFlogNames[] = {
+	FlogEnum::KotetsuFlog,	 // 0 (Konoha LV1)
+	FlogEnum::IzumoFlog,	 // 1 (Konoha LV2)
+	FlogEnum::KakashiFlog,	 // 2 (Konoha LV3)
+	FlogEnum::FemalePainFlog,// 3 (Akatsuki LV1)
+	FlogEnum::PainFlog,		 // 4 (Akatsuki LV2)
+	FlogEnum::ObitoFlog,	 // 5 (Akatsuki LV3)
+};
+constexpr int kNetFlogNameCount = sizeof(kNetFlogNames) / sizeof(kNetFlogNames[0]);
+
+int netFlogVariantForName(const std::string &name)
+{
+	for (int i = 0; i < kNetFlogNameCount; ++i)
+	{
+		if (is_same(name.c_str(), kNetFlogNames[i]))
+			return i;
+	}
+	return 0;
+}
+} // namespace
 
 void BattleRuntimeSystem::onGameStart(GameLayer *layer, bool skipInitFlogs, float flogSpawnDuration) const
 {
@@ -24,20 +60,28 @@ void BattleRuntimeSystem::onGameStart(GameLayer *layer, bool skipInitFlogs, floa
 	layer->getHudLayer()->openingSprite = nullptr;
 	layer->schedule(schedule_selector(GameLayer::updateGameTime), 1.0f);
 	layer->schedule(schedule_selector(GameLayer::checkBackgroundMusic), 2.0f);
+	// Host-authoritative minions: in a LAN battle only the HOST simulates and
+	// spawns flogs; the client mirrors them from snapshots so both devices
+	// always agree on minion count, position and HP.
 	if (!skipInitFlogs)
 	{
-		layer->schedule(schedule_selector(GameLayer::addFlog), flogSpawnDuration);
+		const bool isNetworkClient = layer->_networkBattle && !layer->_isNetworkHost;
 		layer->initFlogs();
-		layer->addFlog(0);
+		if (!isNetworkClient)
+		{
+			layer->schedule(schedule_selector(GameLayer::addFlog), flogSpawnDuration);
+			layer->addFlog(0);
+		}
 	}
 
 	layer->setKeyEventHandler();
-	for (auto hero : layer->_CharacterArray)
-	{
-		hero->setWalkSpeed(hero->_originSpeed);
-		if (hero->isCom())
-			hero->doAI();
-	}
+			for (auto hero : layer->_CharacterArray)
+		{
+			hero->setWalkSpeed(hero->_originSpeed);
+			if (hero->isCom() && !layer->_networkBattle)
+				hero->doAI();
+		}
+
 }
 
 void BattleRuntimeSystem::updateGameTime(GameLayer *layer) const
@@ -106,6 +150,7 @@ GameLayer::GameLayer()
 
 	_isShacking = false;
 	_isSurrender = false;
+	_gameOverShown = false;
 	_hasSpawnedGuardian = false;
 
 	_isStarted = false;
@@ -123,6 +168,8 @@ GameLayer::GameLayer()
 
 	_isGear = false;
 	_isPause = false;
+	_gearLayer = nullptr;
+	_pauseLayer = nullptr;
 
 #if (CC_TARGET_PLATFORM == CC_PLATFORM_WIN32)
 	_lastPressedMovementKey = -100;
@@ -202,22 +249,31 @@ bool GameLayer::isHUDInit()
 
 void GameLayer::initTileMap()
 {
-	setRand();
 	int mapCount = getMapCount();
 	if (mapCount == 0)
 	{
 		CCMessageBox("Not found any map", "[Error] Not found any map");
 		return;
 	}
-	mapId = random(mapCount) + 1;
+	if (_networkBattle)
+		mapId = nsv2::network::sharedLanSession().matchConfig().mapId;
+	else
+	{
+		setRand();
+		mapId = random(mapCount) + 1;
+	}
 	currentMap = TMXTiledMap::create(GetMapPath(mapId));
 	addChild(currentMap, kMapOrder);
 }
 
 void GameLayer::initGard()
 {
-	setRand();
-	int index = random(2);
+	// Guardian is a gameplay entity: in LAN battles only the host spawns it.
+	// The client receives it as a mirror via unit snapshots.
+	if (_networkBattle && !_isNetworkHost)
+		return;
+
+	uint32_t index = netRandom(2);
 	auto guardianName = index == 0 ? GuardianEnum::Roshi : GuardianEnum::Han;
 	auto guardianGroup = playerGroup == Group::Konoha ? Group::Akatsuki : Group::Konoha;
 	auto guardian = Provider::create(guardianName, Role::Com, guardianGroup);
@@ -330,8 +386,11 @@ void GameLayer::initHeros()
 	// Tower HP bar color depends on currentPlayer group, so towers must be
 	// initialized after at least one hero/player is created.
 	initTower();
+	initFlogs();
 
 	schedule(schedule_selector(GameLayer::updateViewPoint), 0.00f);
+	if (_networkBattle)
+		schedule(schedule_selector(GameLayer::updateNetworkBattle), 0.00f);
 	scheduleOnce(schedule_selector(GameLayer::playGameOpeningAnimation), 0.5f);
 }
 
@@ -408,6 +467,8 @@ void GameLayer::addFlog(float dt)
 	{
 		flog = Flog::create();
 		flog->setID(KonohaFlogName, Role::Flog, Group::Konoha);
+		if (_networkBattle && _isNetworkHost)
+			flog->setCharId(kNetFlogIdBase + _netNextFlogId++);
 		if (i < kFlogCount / 2)
 			mainPosY = (5.5 - i / 1.5) * 32;
 		else
@@ -425,6 +486,8 @@ void GameLayer::addFlog(float dt)
 	{
 		flog = Flog::create();
 		flog->setID(AkatsukiFlogName, Role::Flog, Group::Akatsuki);
+		if (_networkBattle && _isNetworkHost)
+			flog->setCharId(kNetFlogIdBase + _netNextFlogId++);
 		if (i < kFlogCount / 2)
 			mainPosY = (5.5 - i / 1.5) * 32;
 		else
@@ -589,6 +652,11 @@ void GameLayer::removeOugisMark(int type)
 
 void GameLayer::checkTower()
 {
+	// Win/lose is a match outcome: only the HOST decides it. The client is
+	// informed through the MatchEnd message so both devices always agree.
+	if (_networkBattle && !_isNetworkHost)
+		return;
+
 	int konohaTowerCount = 0;
 	int akatsukiTowerCount = 0;
 
@@ -650,10 +718,17 @@ void GameLayer::checkTower()
 
 	if (konohaTowerCount == 0 || akatsukiTowerCount == 0)
 	{
+		const Group winnerGroup = konohaTowerCount != 0 ? Group::Konoha : Group::Akatsuki;
+		if (_networkBattle)
+		{
+			std::string error;
+			nsv2::network::sharedLanSession().sendMatchEnd(
+				winnerGroup == Group::Konoha ? 0 : 1, &error);
+		}
 		if (playerGroup == Group::Konoha)
-			onGameOver(konohaTowerCount != 0);
+			onGameOver(winnerGroup == Group::Konoha);
 		else
-			onGameOver(akatsukiTowerCount != 0);
+			onGameOver(winnerGroup == Group::Akatsuki);
 	}
 }
 
@@ -667,11 +742,614 @@ void GameLayer::clearDoubleClick()
 	}
 }
 
+uint32_t GameLayer::netRandom(uint32_t bound)
+{
+	if (bound == 0)
+		return 0;
+	// xorshift32 seeded from MatchConfig::seed so every device produces the
+	// same sequence without relying on wall-clock srand().
+	uint32_t x = _netRngState;
+	x ^= x << 13;
+	x ^= x >> 17;
+	x ^= x << 5;
+	_netRngState = x == 0 ? 0x9E3779B9u : x;
+	return _netRngState % bound;
+}
+
+vector<Flog *> *GameLayer::flogArrayForKind(uint8_t kind)
+{
+	if (kind == static_cast<uint8_t>(nsv2::network::NetUnitKind::FlogKonoha))
+		return &_KonohaFlogArray;
+	if (kind == static_cast<uint8_t>(nsv2::network::NetUnitKind::FlogAkatsuki))
+		return &_AkatsukiFlogArray;
+	return nullptr;
+}
+
+void GameLayer::enableNetworkBattle(uint8_t localSlot)
+{
+	_networkBattle = true;
+	_networkLocalSlot = localSlot;
+	_isNetworkHost = nsv2::network::sharedLanSession().role() == nsv2::network::SessionRole::Host;
+	_networkTick = 0;
+	_networkAccumulator = 0.0f;
+	_lastNetworkJoystickSendTime = 0.0f;
+	_networkBattleTime = 0.0f;
+
+	const uint32_t seed = nsv2::network::sharedLanSession().matchConfig().seed;
+	_netRngState = seed != 0 ? seed : 0x4E535632u;
+	_netLastAppliedTick = 0;
+	_netLastCharState[0] = _netLastCharState[1] = 0;
+	_netNextFlogId = 0;
+	_netCharLerp.clear();
+	_netUnitLerp.clear();
+	_netFlogMirrors.clear();
+	_netGuardianMirror = nullptr;
+	_netGuardianUnitId = -1;
+
+	_netPresentation = std::make_unique<nsv2::network::NetworkPresentationAdapter>();
+	_netPresentation->initialize(this, _networkLocalSlot);
+
+	if (_isNetworkHost)
+	{
+		_authBattleState = std::make_unique<nsv2::network::AuthoritativeBattleState>();
+		_authBattleState->initializeMatch(nsv2::network::sharedLanSession().matchConfig());
+	}
+}
+
+void GameLayer::advanceNetworkInterpolation(float dt)
+{
+	if (!_networkBattle || _isNetworkHost)
+		return;
+
+	if (_netPresentation)
+	{
+		_netPresentation->update(dt);
+	}
+
+	const float advance = dt / kNetInterpPeriod;
+	auto stepLerp = [advance](NetLerp &lerp) {
+		lerp.t = MIN(1.0f, lerp.t + advance);
+		const float k = lerp.t;
+		return Vec2(lerp.from.x * (1.0f - k) + lerp.to.x * k,
+					lerp.from.y * (1.0f - k) + lerp.to.y * k);
+	};
+
+	for (auto &entry : _netUnitLerp)
+	{
+		Vec2 position;
+		auto flogIt = _netFlogMirrors.find(entry.first);
+		if (flogIt != _netFlogMirrors.end() && flogIt->second)
+		{
+			position = stepLerp(entry.second);
+			flogIt->second->setPosition(position);
+			continue;
+		}
+		if (_netGuardianMirror && entry.first == _netGuardianUnitId)
+		{
+			position = stepLerp(entry.second);
+			_netGuardianMirror->setPosition(position);
+		}
+	}
+}
+
+void GameLayer::buildAndSendHostSnapshot()
+{
+	using namespace nsv2::network;
+	auto &session = sharedLanSession();
+
+	StateSnapshot snapshot;
+	snapshot.matchId = session.matchConfig().matchId;
+	snapshot.tick = _networkTick;
+	snapshot.elapsedSeconds = static_cast<uint16_t>(MIN(static_cast<uint32_t>(0xFFFF), getTotalTime()));
+	snapshot.sessionEpoch = session.matchConfig().seed ^ snapshot.matchId;
+
+	for (size_t i = 0; i < _CharacterArray.size() && i < session.matchConfig().maxPlayers; ++i)
+	{
+		auto *character = _CharacterArray[i];
+		if (!character)
+			continue;
+		snapshot.characters.push_back({static_cast<uint8_t>(i),
+			static_cast<int32_t>(character->getPositionX() * 100.0f),
+			static_cast<int32_t>(character->getPositionY() * 100.0f),
+			character->getHP(), character->getCKR(),
+			static_cast<uint8_t>(character->getState()), character->_isFlipped});
+	}
+
+	// Towers share deterministic charIds (map object order) on both devices.
+	for (auto *tower : _TowerArray)
+	{
+		if (!tower)
+			continue;
+		snapshot.units.push_back({static_cast<uint16_t>(kNetTowerIdBase + tower->getCharId()),
+			NetUnitKind::Tower, 0,
+			static_cast<int32_t>(tower->getPositionX() * 100.0f),
+			static_cast<int32_t>(tower->getPositionY() * 100.0f),
+			tower->getHP(), static_cast<uint8_t>(tower->getState()), tower->_isFlipped});
+	}
+
+	// Guardian (hardcore modes) - spawned by the host only.
+	for (auto *character : _CharacterArray)
+	{
+		if (!character || !character->isGuardian() || character->getState() == State::DEAD)
+			continue;
+		const uint8_t variant = (character->getName() == GuardianEnum::Han ? 1 : 0) |
+								(character->getGroup() == Group::Akatsuki ? 2 : 0);
+		snapshot.units.push_back({static_cast<uint16_t>(kNetGuardianId),
+			NetUnitKind::Guardian, variant,
+			static_cast<int32_t>(character->getPositionX() * 100.0f),
+			static_cast<int32_t>(character->getPositionY() * 100.0f),
+			character->getHP(), static_cast<uint8_t>(character->getState()), character->_isFlipped});
+	}
+
+	// Flogs - host-simulated minions mirrored to the client.
+	for (auto *array : {&_KonohaFlogArray, &_AkatsukiFlogArray})
+	{
+		for (auto *flog : *array)
+		{
+			if (!flog || flog->getCharId() < kNetFlogIdBase || flog->getState() == State::DEAD)
+				continue;
+			snapshot.units.push_back({static_cast<uint16_t>(flog->getCharId()),
+				flog->isKonohaGroup() ? NetUnitKind::FlogKonoha : NetUnitKind::FlogAkatsuki,
+				static_cast<uint8_t>(netFlogVariantForName(flog->getName())),
+				static_cast<int32_t>(flog->getPositionX() * 100.0f),
+				static_cast<int32_t>(flog->getPositionY() * 100.0f),
+				flog->getHP(), static_cast<uint8_t>(flog->getState()), flog->_isFlipped});
+		}
+	}
+
+	if (_authBattleState)
+	{
+		_authBattleState->drainCombatEvents(snapshot.combatEvents);
+	}
+
+	snapshot.stateChecksum = computeStateChecksum(snapshot);
+
+	std::string error;
+	session.sendSnapshot(snapshot, &error);
+}
+
+void GameLayer::sendLocalClientState()
+{
+	using namespace nsv2::network;
+	auto &session = sharedLanSession();
+	if (_networkLocalSlot >= _CharacterArray.size() || !_CharacterArray[_networkLocalSlot])
+		return;
+
+	auto *hero = _CharacterArray[_networkLocalSlot];
+	StateSnapshot state;
+	state.matchId = session.matchConfig().matchId;
+	state.tick = _networkTick;
+	state.elapsedSeconds = 0;
+	state.characters.push_back({_networkLocalSlot,
+		static_cast<int32_t>(hero->getPositionX() * 100.0f),
+		static_cast<int32_t>(hero->getPositionY() * 100.0f),
+		hero->getHP(), hero->getCKR(),
+		static_cast<uint8_t>(hero->getState()), hero->_isFlipped});
+
+	std::string error;
+	session.sendClientState(state, &error);
+}
+
+void GameLayer::updateNetworkBattle(float dt)
+{
+	if (!_networkBattle)
+		return;
+	_networkBattleTime += dt;
+	using namespace nsv2::network;
+	auto &session = sharedLanSession();
+	session.poll();
+
+	if (session.state() == nsv2::network::SessionState::Finished || session.state() == nsv2::network::SessionState::Error)
+	{
+		std::vector<SessionNotice> notices;
+		session.drainNotices(notices);
+		onGameOver(true);
+		return;
+	}
+
+	// Relay discrete actions immediately so animations/host combat resolution
+	// are not quantized to the tick accumulator.
+	std::vector<InputCommand> commands;
+	session.drainInputCommands(commands);
+	for (const auto &command : commands)
+	{
+		applyNetworkCommand(command);
+		if (_isNetworkHost && _authBattleState)
+		{
+			_authBattleState->submitPlayerInput(command);
+		}
+	}
+
+	// Smooth remote entity rendering between snapshots.
+	advanceNetworkInterpolation(dt);
+
+	const uint16_t tickRate = session.matchConfig().tickRate == 0 ? 30 : session.matchConfig().tickRate;
+	const float step = 1.0f / static_cast<float>(tickRate);
+	_networkAccumulator += MIN(dt, 0.25f);
+	while (_networkAccumulator >= step)
+	{
+		_networkAccumulator -= step;
+		++_networkTick;
+
+		if (_isNetworkHost)
+		{
+			if (_authBattleState)
+			{
+				_authBattleState->stepSimulation(_networkTick);
+			}
+
+			// Host broadcast at half tick rate (~15 Hz).
+			if (_networkTick % 2 == 0)
+				buildAndSendHostSnapshot();
+		}
+		else if (_networkTick % 3 == 0)
+		{
+			// Client reports its own hero state at ~10 Hz.
+			sendLocalClientState();
+		}
+	}
+
+	std::vector<uint8_t> matchEnds;
+	session.drainMatchEnds(matchEnds);
+	for (const auto &winner : matchEnds)
+	{
+		const Group winnerGroup = winner == 0 ? Group::Konoha : Group::Akatsuki;
+		onGameOver(winnerGroup == playerGroup);
+		return;
+	}
+
+	if (_isNetworkHost)
+	{
+		// Host: consume client-reported hero state.
+		std::vector<StateSnapshot> clientStates;
+		session.drainClientStates(clientStates);
+		for (const auto &state : clientStates)
+			applyClientState(state);
+	}
+	else
+	{
+		// Client: apply newest-first authoritative world snapshots.
+		std::vector<StateSnapshot> snapshots;
+		session.drainSnapshots(snapshots);
+		for (auto &snapshot : snapshots)
+		{
+			if (snapshot.matchId != session.matchConfig().matchId)
+				continue;
+			// Discard stale/out-of-order snapshots instead of rewinding state.
+			if (snapshot.tick <= _netLastAppliedTick)
+				continue;
+			_netLastAppliedTick = snapshot.tick;
+
+			if (_netPresentation)
+			{
+				_netPresentation->applyAuthoritativeSnapshot(snapshot, currentPlayer ? static_cast<float>(currentPlayer->getWalkSpeed()) : 3.0f);
+			}
+
+			for (const auto &charState : snapshot.characters)
+				applyCharacterSnapshot(charState);
+			applyNetworkUnits(snapshot.units);
+
+			// Match clock follows the host so timers cannot drift apart.
+			if (getHudLayer() && getHudLayer()->gameClock)
+			{
+				setTotalTime(snapshot.elapsedSeconds);
+				auto tempTime = format("{:02d}:{:02d}", snapshot.elapsedSeconds / 60, snapshot.elapsedSeconds % 60);
+				getHudLayer()->gameClock->setString(tempTime.c_str());
+			}
+		}
+	}
+}
+
+void GameLayer::applyClientState(const nsv2::network::StateSnapshot &state)
+{
+	using namespace nsv2::network;
+	if (state.characters.empty())
+		return;
+	const auto &characterState = state.characters[0];
+	if (characterState.slot >= _CharacterArray.size())
+		return;
+	auto *character = _CharacterArray[characterState.slot];
+	if (!character || character->getState() == State::DEAD)
+		return;
+
+	// The client owns this hero's position; the host trusts it for combat
+	// resolution so both simulations fight over the same coordinates.
+	auto &lerp = _netCharLerp[characterState.slot];
+	lerp.from = character->getPosition();
+	lerp.to = Vec2(characterState.x / 100.0f, characterState.y / 100.0f);
+	lerp.t = 0.0f;
+	character->setFlipX(characterState.flipped);
+
+	const auto nextState = static_cast<State>(characterState.state);
+	if (nextState == State::WALK && character->getState() != State::WALK)
+		character->walk(Vec2(characterState.flipped ? -1.0f : 1.0f, 0.0f));
+	else if (nextState == State::IDLE && character->getState() != State::IDLE &&
+			 character->getState() != State::NATTACK && character->getState() != State::SATTACK)
+		character->idle();
+}
+
+void GameLayer::applyNetworkCommand(const nsv2::network::InputCommand &command)
+{
+	if (command.playerSlot >= _CharacterArray.size())
+		return;
+	auto *character = _CharacterArray[command.playerSlot];
+	if (!character)
+		return;
+	// Movement is NOT input-driven anymore: positions flow through
+	// Snapshot (host -> client) and ClientState (client -> host), so Move
+	// commands are ignored everywhere. Only discrete actions are relayed.
+	if (command.action == nsv2::network::ActionType::Move)
+		return;
+	if (command.action == nsv2::network::ActionType::NormalAttack)
+	{
+		character->attack(NAttack);
+	}
+	else if (command.action == nsv2::network::ActionType::Skill1)
+	{
+		character->attack(SKILL1);
+	}
+	else if (command.action == nsv2::network::ActionType::Skill2)
+	{
+		character->attack(SKILL2);
+	}
+	else if (command.action == nsv2::network::ActionType::Skill3)
+	{
+		character->attack(SKILL3);
+	}
+	else if (command.action == nsv2::network::ActionType::Skill4)
+	{
+		character->attack(OUGIS1);
+	}
+	else if (command.action == nsv2::network::ActionType::Skill5)
+	{
+		character->attack(OUGIS2);
+	}
+	else if (command.action == nsv2::network::ActionType::Item1)
+	{
+		character->setItem(Item1);
+	}
+}
+
+void GameLayer::applyCharacterSnapshot(const nsv2::network::CharacterSnapshot &state)
+{
+	if (state.slot >= _CharacterArray.size() || state.slot >= 2)
+		return;
+	auto *character = _CharacterArray[state.slot];
+	if (!character)
+		return;
+
+	const bool wasDead = _netLastCharState[state.slot] == static_cast<uint8_t>(State::DEAD);
+	const bool isDead = state.state == static_cast<uint8_t>(State::DEAD);
+
+	if (isDead && !wasDead)
+	{
+		// Authoritative death: replicate the outcome of CharacterBase::dead()
+		// without triggering local reborn scheduling (host owns reborn timing).
+		character->stopAllActions();
+		character->setState(State::DEAD);
+		character->setHPValue(0, false);
+		if (character->_hpBar)
+		{
+			character->_hpBar->removeFromParent();
+			character->_hpBar = nullptr;
+		}
+		character->runAction(FadeOut::create(0.5f));
+		character->_deadNum++;
+		if (state.slot == _networkLocalSlot)
+		{
+			if (getHudLayer())
+			{
+				if (getHudLayer()->hpLabel)
+					getHudLayer()->hpLabel->setString("0");
+				if (getHudLayer()->status_hpbar)
+					getHudLayer()->status_hpbar->setOpacity(0);
+				if (getHudLayer()->deadLabel)
+				{
+					auto deadStr = getHudLayer()->deadLabel->getString();
+					int deads = to_int(deadStr) + 1;
+					getHudLayer()->deadLabel->setString(to_cstr(deads));
+				}
+			}
+		}
+		CCNotificationCenter::sharedNotificationCenter()->postNotification("updateMap", character);
+		_netLastCharState[state.slot] = state.state;
+		return;
+	}
+
+	if (!isDead && wasDead)
+	{
+		// Authoritative revival: restore what Hero::reborn restores.
+		character->setPosition(Vec2(state.x / 100.0f, state.y / 100.0f));
+		CCNotificationCenter::sharedNotificationCenter()->addObserver(
+			character, callfuncO_selector(CharacterBase::acceptAttack), "acceptAttack", nullptr);
+		character->setOpacity(255);
+		character->setVisible(true);
+		character->setHPValue(state.hp, false);
+		character->setHPbar();
+		character->setFlipX(state.flipped);
+		character->_isFlipped = state.flipped;
+		character->setState(static_cast<State>(state.state));
+		character->idle();
+		_netLastCharState[state.slot] = state.state;
+		_netCharLerp.erase(state.slot);
+		return;
+	}
+
+	_netLastCharState[state.slot] = state.state;
+
+	// Host is the single source of truth for HP/CKR: no local writer remains.
+	if (character->getHP() != state.hp)
+	{
+		character->setHPValue(state.hp, true);
+		if (state.slot == _networkLocalSlot && getHudLayer() && getHudLayer()->status_hpbar)
+			setHPLose(character->getHpPercent());
+	}
+	character->setCKR(state.ckr);
+
+	if (state.slot == _networkLocalSlot)
+		return; // Own movement stays locally simulated (reported to host).
+
+	// Remote hero: interpolate toward the authoritative position.
+	auto &lerp = _netCharLerp[state.slot];
+	lerp.from = character->getPosition();
+	lerp.to = Vec2(state.x / 100.0f, state.y / 100.0f);
+	lerp.t = 0.0f;
+	if (character->_isFlipped != state.flipped)
+	{
+		character->_isFlipped = state.flipped;
+		character->setFlipX(state.flipped);
+	}
+	const auto nextState = static_cast<State>(state.state);
+	if (nextState == State::WALK && character->getState() != State::WALK)
+		character->walk(Vec2(state.flipped ? -1.0f : 1.0f, 0.0f));
+	else if (nextState == State::IDLE && character->getState() == State::WALK)
+		character->idle();
+}
+
+void GameLayer::applyNetworkUnits(const std::vector<nsv2::network::UnitSnapshot> &units)
+{
+	using namespace nsv2::network;
+	std::set<int> aliveIds;
+
+	for (const auto &unit : units)
+	{
+		aliveIds.insert(unit.unitId);
+
+		if (unit.kind == NetUnitKind::Tower)
+		{
+			const int towerCharId = unit.unitId - kNetTowerIdBase;
+			for (auto *tower : _TowerArray)
+			{
+				if (!tower || tower->getCharId() != towerCharId ||
+					tower->getState() == State::DEAD)
+					continue;
+				if (tower->getHP() != unit.hp)
+					tower->setHPValue(unit.hp, true);
+				if (unit.hp == 0 || unit.state == static_cast<uint8_t>(State::DEAD))
+				{
+					tower->dead();
+				}
+				break;
+			}
+			continue;
+		}
+
+		if (unit.kind == NetUnitKind::Guardian)
+		{
+			if (!_netGuardianMirror || _netGuardianUnitId != unit.unitId)
+			{
+				// Create the guardian mirror exactly like initGard does, but
+				// driven purely by host data (name/group packed in variant).
+				const auto guardianName = (unit.variant & 0x01) ? GuardianEnum::Han : GuardianEnum::Roshi;
+				const auto guardianGroup = (unit.variant & 0x02) ? Group::Akatsuki : Group::Konoha;
+				auto *guardian = Provider::create(guardianName, Role::Com, guardianGroup);
+				guardian->setPosition(Vec2(unit.x / 100.0f, unit.y / 100.0f));
+				guardian->setSpawnPoint(guardian->getPosition());
+				guardian->setLV(6);
+				guardian->setHPbar();
+				guardian->setShadows();
+				guardian->setCharId(_CharacterArray.size() + 1);
+				guardian->idle();
+				guardian->setSkillEffect("smk");
+				// NO doAI(): the mirror never makes gameplay decisions.
+				addChild(guardian, -guardian->getPositionY());
+				_CharacterArray.push_back(guardian);
+				_hasSpawnedGuardian = true;
+				_netGuardianMirror = guardian;
+				_netGuardianUnitId = unit.unitId;
+				_netUnitLerp.erase(unit.unitId);
+			}
+			auto &lerp = _netUnitLerp[unit.unitId];
+			lerp.from = _netGuardianMirror->getPosition();
+			lerp.to = Vec2(unit.x / 100.0f, unit.y / 100.0f);
+			lerp.t = 0.0f;
+			if (_netGuardianMirror->getHP() != unit.hp)
+				_netGuardianMirror->setHPValue(unit.hp, true);
+			continue;
+		}
+
+		// Flog mirrors.
+		auto *mirror = _netFlogMirrors.count(unit.unitId) ? _netFlogMirrors[unit.unitId] : nullptr;
+		if (!mirror)
+		{
+			const int nameIndex = MIN(static_cast<int>(unit.variant), kNetFlogNameCount - 1);
+			auto *flog = Flog::create();
+			flog->setID(kNetFlogNames[nameIndex], Role::Flog,
+						unit.kind == NetUnitKind::FlogKonoha ? Group::Konoha : Group::Akatsuki);
+			flog->_mainPosY = unit.y / 100.0f;
+			flog->setPosition(Vec2(unit.x / 100.0f, unit.y / 100.0f));
+			flog->setHPbar();
+			flog->idle();
+			// NO doAI(): pure mirror of the host simulation.
+			auto *array = flogArrayForKind(static_cast<uint8_t>(unit.kind));
+			if (array)
+				array->push_back(flog);
+			_netFlogMirrors[unit.unitId] = flog;
+			addChild(flog, -int(flog->getPositionY()));
+			mirror = flog;
+			_netUnitLerp.erase(unit.unitId);
+		}
+		auto &lerp = _netUnitLerp[unit.unitId];
+		lerp.from = mirror->getPosition();
+		lerp.to = Vec2(unit.x / 100.0f, unit.y / 100.0f);
+		lerp.t = 0.0f;
+		if (mirror->getHP() != unit.hp)
+			mirror->setHPValue(unit.hp, true);
+		if (mirror->_isFlipped != unit.flipped)
+		{
+			mirror->_isFlipped = unit.flipped;
+			mirror->setFlipX(unit.flipped);
+		}
+	}
+
+	// Entities absent from the host snapshot have died on the host: run the
+	// regular death flow so arrays/z-order clean up identically on both sides.
+	for (auto it = _netFlogMirrors.begin(); it != _netFlogMirrors.end();)
+	{
+		if (aliveIds.count(it->first))
+		{
+			++it;
+			continue;
+		}
+		if (it->second && it->second->getState() != State::DEAD)
+			it->second->dead();
+		_netUnitLerp.erase(it->first);
+		it = _netFlogMirrors.erase(it);
+	}
+	if (_netGuardianMirror && !aliveIds.count(_netGuardianUnitId))
+	{
+		if (_netGuardianMirror->getState() != State::DEAD)
+			_netGuardianMirror->dead();
+		_netGuardianMirror = nullptr;
+		_netGuardianUnitId = -1;
+	}
+	for (auto it = _TowerArray.begin(); it != _TowerArray.end();)
+	{
+		auto *tower = *it;
+		if (tower && tower->getState() != State::DEAD &&
+			!aliveIds.count(kNetTowerIdBase + tower->getCharId()))
+		{
+			tower->dead();
+		}
+		++it;
+	}
+}
+
 void GameLayer::JoyStickRelease()
 {
-	if (currentPlayer->getState() == State::WALK)
+	if (currentPlayer && currentPlayer->getState() == State::WALK)
 	{
 		currentPlayer->idle();
+	}
+	if (_networkBattle)
+	{
+		nsv2::network::InputCommand command;
+		command.tick = _networkTick;
+		command.action = nsv2::network::ActionType::Move;
+		command.axisX = 0;
+		command.axisY = 0;
+		command.isDiscreteAction = true;
+		nsv2::network::sharedLanSession().submitInput(command);
 	}
 }
 
@@ -679,13 +1357,62 @@ void GameLayer::JoyStickUpdate(Vec2 direction)
 {
 	if (!ougisChar)
 	{
-		// CCLOG("x:%f,y:%f",direction.x,direction.y);
 		currentPlayer->walk(direction);
+		if (_networkBattle && (_networkBattleTime - _lastNetworkJoystickSendTime >= 0.033f))
+		{
+			_lastNetworkJoystickSendTime = _networkBattleTime;
+			nsv2::network::InputCommand command;
+			command.tick = _networkTick;
+			command.action = nsv2::network::ActionType::Move;
+			command.axisX = static_cast<int16_t>(std::clamp(direction.x * 1000.0f, -1000.0f, 1000.0f));
+			command.axisY = static_cast<int16_t>(std::clamp(direction.y * 1000.0f, -1000.0f, 1000.0f));
+			command.isDiscreteAction = false;
+			nsv2::network::sharedLanSession().submitInput(command);
+
+			if (_netPresentation && currentPlayer)
+			{
+				_netPresentation->recordPredictedInput(command.sequence, command.tick, command.axisX, command.axisY, static_cast<float>(currentPlayer->getWalkSpeed()), 0.033f);
+			}
+		}
 	}
 }
 
 void GameLayer::attackButtonClick(ABType type)
 {
+	if (_networkBattle)
+	{
+		nsv2::network::InputCommand command;
+		command.tick = _networkTick;
+		command.isDiscreteAction = true;
+		if (type == NAttack)
+		{
+			_isAttackButtonRelease = false;
+			command.action = nsv2::network::ActionType::NormalAttack;
+		}
+		else if (type == SKILL1)
+			command.action = nsv2::network::ActionType::Skill1;
+		else if (type == SKILL2)
+			command.action = nsv2::network::ActionType::Skill2;
+		else if (type == SKILL3)
+			command.action = nsv2::network::ActionType::Skill3;
+		else if (type == OUGIS1)
+			command.action = nsv2::network::ActionType::Skill4;
+		else if (type == OUGIS2)
+			command.action = nsv2::network::ActionType::Skill5;
+		else if (type == Item1)
+			command.action = nsv2::network::ActionType::Item1;
+		else
+			return;
+
+		nsv2::network::sharedLanSession().submitInput(command);
+
+		// Local responsive trigger for client/host
+		if (type == Item1)
+			currentPlayer->setItem(type);
+		else
+			currentPlayer->attack(type);
+		return;
+	}
 	if (type == NAttack)
 	{
 		_isAttackButtonRelease = false;
@@ -717,6 +1444,17 @@ void GameLayer::onPause()
 		return;
 
 	_isPause = true;
+	if (_networkBattle)
+	{
+		PauseLayer *layer = PauseLayer::create(nullptr);
+		_pauseLayer = layer;
+		if (getHudLayer())
+			getHudLayer()->addChild(layer, 9999);
+		else
+			addChild(layer, 9999);
+		return;
+	}
+
 	RenderTexture *snapshoot = RenderTexture::create(winSize.width, winSize.height);
 	Scene *f = Director::sharedDirector()->getRunningScene();
 	Ref *pObject = f->getChildren()->objectAtIndex(0);
@@ -729,6 +1467,7 @@ void GameLayer::onPause()
 
 	Scene *pscene = Scene::create();
 	PauseLayer *layer = PauseLayer::create(snapshoot);
+	_pauseLayer = layer;
 	pscene->addChild(layer);
 	Director::sharedDirector()->pushScene(pscene);
 }
@@ -747,8 +1486,18 @@ void GameLayer::resumeFromPause()
 		SimpleAudioEngine::sharedEngine()->resumeAllEffects();
 	}
 
-	Director::sharedDirector()->popScene();
-	_isPause = false;
+	if (_pauseLayer)
+	{
+		auto *layer = _pauseLayer;
+		_pauseLayer = nullptr;
+		_isPause = false;
+		layer->removeFromParent();
+	}
+	else
+	{
+		Director::sharedDirector()->popScene();
+		_isPause = false;
+	}
 }
 
 void GameLayer::onGear()
@@ -758,6 +1507,18 @@ void GameLayer::onGear()
 	if (_isGear)
 		return;
 	_isGear = true;
+
+	if (_networkBattle)
+	{
+		GearLayer *layer = GearLayer::create(nullptr);
+		_gearLayer = layer;
+		layer->updatePlayerGear();
+		if (getHudLayer())
+			getHudLayer()->addChild(layer, 9999);
+		else
+			addChild(layer, 9999);
+		return;
+	}
 
 	RenderTexture *snapshoot = RenderTexture::create(winSize.width, winSize.height);
 	Scene *f = Director::sharedDirector()->getRunningScene();
@@ -779,14 +1540,37 @@ void GameLayer::onGear()
 
 void GameLayer::onGameOver(bool isWin)
 {
+	if (_gameOverShown)
+		return;
+	_gameOverShown = true;
 	removeKeyEventHandler();
+	if (_networkBattle)
+	{
+		nsv2::network::sharedLanSession().stop();
+		_networkBattle = false;
+	}
 
-	if (_isPause)
+	if (_pauseLayer)
+	{
+		auto *layer = _pauseLayer;
+		_pauseLayer = nullptr;
+		_isPause = false;
+		layer->removeFromParent();
+	}
+	else if (_isPause)
 	{
 		_isPause = false;
 		Director::sharedDirector()->popScene();
 	}
-	if (_isGear)
+
+	if (_gearLayer)
+	{
+		auto *layer = _gearLayer;
+		_gearLayer = nullptr;
+		_isGear = false;
+		layer->removeFromParent();
+	}
+	else if (_isGear)
 	{
 		_isGear = false;
 		Director::sharedDirector()->popScene();
@@ -794,25 +1578,39 @@ void GameLayer::onGameOver(bool isWin)
 
 	RenderTexture *snapshoot = RenderTexture::create(winSize.width, winSize.height);
 	Scene *f = Director::sharedDirector()->getRunningScene();
-	Ref *pObject = f->getChildren()->objectAtIndex(0);
-	BGLayer *bg = (BGLayer *)pObject;
-	snapshoot->begin();
-	bg->visit();
-	visit();
-	snapshoot->end();
+	if (f && f->getChildren() && f->getChildren()->count() > 0)
+	{
+		Ref *pObject = f->getChildren()->objectAtIndex(0);
+		BGLayer *bg = dynamic_cast<BGLayer *>(pObject);
+		snapshoot->begin();
+		if (bg)
+			bg->visit();
+		visit();
+		snapshoot->end();
+	}
 
 	getGameModeHandler()->Internal_GameOver();
 
 	Scene *pscene = Scene::create();
 	GameOver *layer = GameOver::create(snapshoot);
-	layer->setWin(isWin);
-	pscene->addChild(layer);
-	Director::sharedDirector()->pushScene(pscene);
+	if (layer)
+	{
+		layer->setWin(isWin);
+		pscene->addChild(layer);
+		Director::sharedDirector()->pushScene(pscene);
+	}
 }
 
 void GameLayer::onLeft()
 {
-	CCNotificationCenter::sharedNotificationCenter()->purgeNotificationCenter();
+	if (_networkBattle)
+	{
+		nsv2::network::sharedLanSession().stop();
+		_networkBattle = false;
+	}
+
+	unscheduleUpdate();
+	unscheduleAllSelectors();
 
 	CCArray *childArray = getChildren();
 	Ref *pObject;
@@ -845,7 +1643,8 @@ void GameLayer::onLeft()
 	removeSprites("UI.plist");
 	removeSprites("Map.plist");
 
-	SimpleAudioEngine::sharedEngine()->end();
+	SimpleAudioEngine::sharedEngine()->stopAllEffects();
+	SimpleAudioEngine::sharedEngine()->stopBackgroundMusic(true);
 
 	lua_call_func(UiFlowKeys::kOnGameOver);
 }

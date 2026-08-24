@@ -23,6 +23,8 @@ Checklist karakter meliputi factory name dan alias, `setID`, role/group, spawn/f
 
 Mode baru memerlukan enum, handler, entry pada registry, label/deskripsi, tombol/resource, roster logic, map, team, tower/flog, gear/reborn rule, win condition, cleanup, dan dukungan SelectLayer. Jangan mengubah `Classic` untuk eksperimen online; buat handler/variant terpisah sehingga local mode tetap stabil.
 
+Untuk LAN branch ini, mode yang sudah di-wire adalah 1v1 dengan roster terbatas dan `MatchConfig` deterministik. Perubahan LAN harus menjaga mode offline tetap tidak membuat socket atau memanggil polling. Detail kontrak ada di [lan-multiplayer.md](lan-multiplayer.md).
+
 ## Extension point UI
 
 Menu dan scene C++ memakai `MenuItemSprite`, `Menu`, dan touch delegate; UI Lua memakai `ui.newImageMenuItem`, `Button`, dan `TouchGroup`. Callback lintas bahasa harus memakai key terpusat di `UiFlowKeys.hpp` serta helper `Cocos2dxHelper.hpp`.
@@ -41,6 +43,8 @@ Gunakan `CCLOG`/`LOG` dengan context yang jelas. Debug minimal harus mencatat mo
 
 Tidak ada test suite unit/integration lengkap di repository. Smoke test minimum adalah launch menu, scroll menu, buka Training, pilih mode, masuk select, ganti page, pilih hero dengan tap dua kali, buka/tutup Skill, mulai battle, gerak, normal attack, skill, Ougi, gear, item, pause, toggle setting, resume, surrender, GameOver, kembali menu, dan mulai match kedua.
 
+Untuk perubahan LAN, tambahkan pemeriksaan berikut secara berurutan: jalankan game offline dan pastikan tidak ada socket/worker LAN; buka Network Home tanpa memilih Host/Join dan pastikan tidak ada polling LAN; pilih Host pada perangkat pertama; pilih Join pada perangkat kedua; verifikasi discovery atau manual IP; uji handshake, hero, ready, loaded barrier, input, snapshot, leave, timeout, hardware Back, dan kembali ke StartMenu. Setelah match LAN selesai, pastikan GameOver tidak ganda, aplikasi tidak force close, dan session/worker berhenti.
+
 | Area perubahan | Verifikasi minimum |
 |---|---|
 | Menu/scene | Semua tombol, back, fade/push/pop, audio, dan cleanup. |
@@ -49,7 +53,7 @@ Tidak ada test suite unit/integration lengkap di repository. Smoke test minimum 
 | Resource | Clean build, atlas registration, case path, audio, Android asset copy. |
 | Save | Coin, win count, best time, restart aplikasi, schema lama. |
 | Platform | Target yang terdampak; desktop build tidak membuktikan Android. |
-| Multiplayer | Reconnect, timeout, duplicate command, desync, server validation. |
+| Multiplayer LAN | Protocol round-trip, payload >64 KiB, message type/version invalid, sequence out-of-order, offline tanpa socket, host/client loopback, discovery/manual IP, timeout, Back, cleanup GameOver, dan worker tanpa akses Cocos2d-x. |
 
 ## Pre-commit checklist
 

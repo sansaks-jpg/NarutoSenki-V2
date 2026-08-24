@@ -90,7 +90,7 @@
       <AdditionalOptions>/Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>libExtensions.lib;libcocos2d.lib;libCocosDenshion.lib;opengl32.lib;glew32.lib;pthreadVCE2.lib;sqlite3.lib;glfw3.lib;liblua.lib;lua51.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>libExtensions.lib;libcocos2d.lib;libCocosDenshion.lib;opengl32.lib;glew32.lib;pthreadVCE2.lib;sqlite3.lib;glfw3.lib;liblua.lib;lua51.lib;Ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)$(ProjectName).exe</OutputFile>
       <AdditionalLibraryDirectories>$(OutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -131,7 +131,7 @@ xcopy /Y /Q "$(SolutionDir)$(Configuration).win32\*.exe" "$(SolutionDir)projects
       <LanguageStandard_C>Default</LanguageStandard_C>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>libExtensions.lib;libcocos2d.lib;libCocosDenshion.lib;opengl32.lib;glew32.lib;pthreadVCE2.lib;sqlite3.lib;glfw3.lib;liblua.lib;lua51.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>libExtensions.lib;libcocos2d.lib;libCocosDenshion.lib;opengl32.lib;glew32.lib;pthreadVCE2.lib;sqlite3.lib;glfw3.lib;liblua.lib;lua51.lib;Ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(OutDir)$(ProjectName).exe</OutputFile>
       <AdditionalLibraryDirectories>$(OutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -177,6 +177,12 @@ xcopy /Y /Q "$(SolutionDir)$(Configuration).win32\*.exe" "$(SolutionDir)projects
     <ClCompile Include="..\Classes\PauseLayer.cpp" />
     <ClCompile Include="..\Classes\SelectLayer.cpp" />
     <ClCompile Include="..\Classes\StartMenu.cpp" />
+    <ClCompile Include="..\Classes\Network\LanProtocol.cpp" />
+    <ClCompile Include="..\Classes\Network\LanTransport.cpp" />
+    <ClCompile Include="..\Classes\Network\LanDiscovery.cpp" />
+    <ClCompile Include="..\Classes\Network\LanSession.cpp" />
+    <ClCompile Include="..\Classes\Network\LanNetworkRuntime.cpp" />
+    <ClCompile Include="..\Classes\Network\NetworkLobbyLayer.cpp" />
     <ClCompile Include="..\Classes\UI\GameModeLayer.cpp" />
     <ClCompile Include="main.cpp" />
   </ItemGroup>
@@ -187,7 +193,14 @@ xcopy /Y /Q "$(SolutionDir)$(Configuration).win32\*.exe" "$(SolutionDir)projects
     <ClInclude Include="..\Classes\AppDelegate.h" />
     <ClInclude Include="..\Classes\BGLayer.h" />
     <ClInclude Include="..\Classes\CreditsLayer.h" />
-    <ClInclude Include="..\Classes\Defines.h" />
+        <ClInclude Include="..\Classes\Defines.h" />
+    <ClInclude Include="..\Classes\Network\LanProtocol.hpp" />
+    <ClInclude Include="..\Classes\Network\LanTransport.hpp" />
+    <ClInclude Include="..\Classes\Network\LanDiscovery.hpp" />
+    <ClInclude Include="..\Classes\Network\LanSession.hpp" />
+    <ClInclude Include="..\Classes\Network\LanNetworkRuntime.hpp" />
+    <ClInclude Include="..\Classes\Network\NetworkLobbyLayer.h" />
+
     <ClInclude Include="..\Classes\Effect.h" />
     <ClInclude Include="..\Classes\Element.h" />
     <ClInclude Include="..\Classes\Enums\Audio.hpp" />

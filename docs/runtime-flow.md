@@ -21,8 +21,9 @@ Platform main
 | Scene/layer | Dibuat oleh | Masuk dari | Keluar ke |
 |---|---|---|---|
 | `GameScene` | `lua/main.lua` | AppDelegate | `StartMenu` |
-| `StartMenu` | `GameScene` atau `onGameOver()` | Startup/game over | `GameModeLayer`, `CreditsLayer`, exit, atau no-op untuk News/Login |
+| `StartMenu` | `GameScene` atau `onGameOver()` | Startup/game over/Back dari Network | `GameModeLayer`, `NetworkLobbyLayer`, `CreditsLayer`, exit, atau no-op untuk News/Login |
 | `GameModeLayer` | `StartMenu::onTrainingCallBack()` | Training | `SelectLayer` melalui callback Lua atau StartMenu melalui Return |
+| `NetworkLobbyLayer` | `StartMenu::onCustomCallBack()` | Network pada StartMenu | Network Home, Host/Join lobby, atau kembali ke StartMenu |
 | `SelectLayer` | `enterSelectLayer()` Lua | Mode terpilih | `SkillLayer`, `LoadLayer`, atau StartMenu |
 | `SkillLayer` | `SelectLayer:onSkillMenuButtonClick()` | Skill | `SelectLayer` melalui `popScene()` |
 | `LoadLayer` | `SelectLayer::onGameStart()` | Start | `GameLayer` setelah preload/init |
@@ -42,15 +43,23 @@ Platform main
 6. C++ memanggil global Lua `enterSelectLayer(mode, enableCustomSelect)`.
 7. Lua memuat atlas select/battle, menyimpan `_G.mode`, membuat `SelectLayer`, dan melakukan fade transition.
 
+Jalur Network tidak melewati pemilihan mode offline. `StartMenu::onCustomCallBack()` membuka `NetworkLobbyLayer` secara langsung. Network Home hanya merender Host/Join/Back; socket, worker UDP, discovery, dan polling belum aktif sampai pemain memilih Host atau Join.
+
 ## Character selection sequence
 
 `SelectLayer:init()` menentukan apakah mode 1v1/Clone, 3v3, atau 4v4. Ia memuat tiga page portrait, membuat `SelectButton` untuk setiap karakter pada `ns.CharactersLayout`, dan menampilkan hero pertama. `SelectButton:click()` memakai dua tahap: tap pertama preview/voice, tap kedua mengunci karakter. Pada mode custom, tahap berikutnya mengisi slot COM satu per satu.
 
 Tombol Skill mendorong `SkillLayer` di atas select scene. Tombol Return melakukan `popScene()`. Tombol Start memanggil `SelectLayer:onGameStart()`, menonaktifkan input, menjalankan `gameModeHandler:onInitHeros()`, melakukan preload audio, dan mengganti scene ke `LoadLayer`.
 
+## Network lobby dan battle initialization
+
+`NetworkLobbyLayer` memiliki tiga halaman: Network Home, Host, dan Join. Host mengaktifkan advertising discovery serta transport gameplay; Join mengaktifkan scanner discovery, sedangkan manual `IP:port` menjadi fallback jika broadcast hotspot tidak tersedia. Setelah handshake, lobby, hero selection, ready, dan loaded barrier selesai, `LanSession` memasuki state Battle dan layer berpindah ke `LoadLayer` dengan konfigurasi 1v1 deterministik.
+
 ## Battle initialization
 
-`LoadLayer` memuat resource dan audio. Setelah siap, `GameLayer` membuat `BattleRuntimeSystem`, mode handler, unit/tower/flog, map, dan `HudLayer`. `HudLayer::initHeroInterface()` membuat joystick pada mobile, action button, item, gear, pause, minimap, dan status display. `GameLayer::onGameStart(float)` kemudian menjalankan battle runtime serta callback `handler->onGameStart()`.
+`LoadLayer` memuat resource dan audio. Setelah siap, `GameLayer` membuat `BattleRuntimeSystem`, mode handler, unit/tower/flog, map, dan `HudLayer`. `HudLayer::initHeroInterface()` membuat joystick pada mobile, action button, item, gear, pause, minimap, dan status display. Pada battle LAN, `GameLayer::updateNetworkBattle()` menjalankan fixed tick, mengirim input command, dan menerapkan snapshot host. Pada mode offline, `_networkBattle` false sehingga jalur LAN dilewati seluruhnya.
+
+`GameLayer::onGameStart(float)` kemudian menjalankan battle runtime serta callback `handler->onGameStart()`. `LanSession::poll()` hanya dijalankan oleh main thread melalui callback update ketika transport/discovery aktif.
 
 ## Input dan dispatch
 
@@ -74,7 +83,7 @@ Pause dan Gear adalah overlay scene dengan screenshot battle sebagai background.
 
 ## Game over
 
-GameOver menghitung report, reward, coin, record, dan win/death. Tombol close memanggil mode handler cleanup lalu callback Lua `onGameOver()`. Lua membuat ulang `StartMenu`, mendaftarkan init handler, dan melakukan fade transition. Semua perubahan pada pointer `selectLayer`, observer, schedule, dan audio harus diuji saat alur ini dijalankan berulang kali.
+GameOver menghitung report, reward, coin, record, dan win/death. Pada battle LAN, session dihentikan saat GameOver pertama kali ditampilkan agar worker/socket tidak terbawa ke scene berikutnya. Guard idempotensi mencegah GameOver ganda dan `popScene()` ganda. Tombol close memanggil mode handler cleanup lalu callback Lua `onGameOver()`. Lua membuat ulang `StartMenu`, mendaftarkan init handler, dan melakukan fade transition. Semua perubahan pada pointer `selectLayer`, observer, schedule, dan audio harus diuji saat alur ini dijalankan berulang kali.
 
 ## Referensi
 

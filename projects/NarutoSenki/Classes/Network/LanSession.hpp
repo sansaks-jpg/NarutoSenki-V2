@@ -64,8 +64,15 @@ public:
     bool markLoaded(std::string *error = nullptr);
     bool submitInput(const InputCommand &command, std::string *error = nullptr);
     void drainInputCommands(std::vector<InputCommand> &commands);
+    // Host -> Client full authoritative world snapshot.
     bool sendSnapshot(const StateSnapshot &snapshot, std::string *error = nullptr);
     void drainSnapshots(std::vector<StateSnapshot> &snapshots);
+    // Client -> Host authoritative state of the client-owned hero.
+    bool sendClientState(const StateSnapshot &state, std::string *error = nullptr);
+    void drainClientStates(std::vector<StateSnapshot> &states);
+    // Host -> Client final match verdict (payload: winner GroupId).
+    bool sendMatchEnd(uint8_t winnerGroup, std::string *error = nullptr);
+    void drainMatchEnds(std::vector<uint8_t> &winners);
 
     void drainNotices(std::vector<SessionNotice> &notices);
     SessionRole role() const { return _role; }
@@ -92,6 +99,15 @@ private:
     void initializeConfig();
     bool updateRemoteHero(const std::string &heroName);
     bool validateInput(const InputCommand &command, std::string *error) const;
+    void processReliableQueue(uint64_t nowMs);
+    void clearBattleQueues();
+
+    struct PendingReliable
+    {
+        Message message;
+        uint64_t lastSendMs = 0;
+        int attempts = 0;
+    };
 
     LanTransport _transport;
     LanDiscovery _discovery;
@@ -111,7 +127,18 @@ private:
     std::deque<SessionNotice> _notices;
     std::deque<InputCommand> _inputCommands;
     std::deque<StateSnapshot> _snapshots;
+    std::deque<StateSnapshot> _clientStates;
+    std::deque<uint8_t> _matchEnds;
+    std::vector<PendingReliable> _pendingReliable;
     uint32_t _lastRemoteInputSequence = 0;
+    // Highest sequence of OUR inputs the remote peer has acked back to us.
+    uint32_t _lastAckedByRemote = 0;
+    // Replay window: bit i of the mask is set when sequence
+    // (_remoteSequenceWatermark - i) was already accepted/applied. Lets late
+    // retransmits fill gaps while rejecting replays of applied inputs.
+    uint64_t _remoteRecentMask = 0;
+    uint32_t _remoteSequenceWatermark = 0;
+    bool tryAcceptRemoteSequence(uint32_t sequence);
     uint64_t _sessionStartedMs = 0;
     uint64_t _lastReceiveMs = 0;
     uint64_t _lastHeartbeatMs = 0;

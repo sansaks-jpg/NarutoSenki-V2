@@ -394,6 +394,15 @@ void CharacterBase::acceptAttack(Ref *object)
 	auto attacker = (CharacterBase *)object;
 	bool isCannotMiss = false;
 
+	// Host-authoritative rule: in a LAN battle the CLIENT never resolves
+	// incoming attacks (no local damage, hurt states or knockback). Every
+	// outcome is delivered by host snapshots so both devices stay identical.
+	{
+		auto *layer = getGameLayer();
+		if (layer && layer->isNetworkBattle() && !layer->isNetworkHost())
+			return;
+	}
+
 	if (!onAcceptAttack(attacker))
 		return;
 
@@ -1260,6 +1269,15 @@ void CharacterBase::setDamage(CharacterBase *attacker)
 
 void CharacterBase::setDamage(CharacterBase *attacker, const string &effectType, int attackValue, bool isFlipped)
 {
+	// Belt-and-braces authority guard: covers direct damage paths (e.g. DOT
+	// buffs) that bypass acceptAttack. On the client only host snapshots may
+	// mutate HP/CKR.
+	{
+		auto *layer = getGameLayer();
+		if (layer && layer->isNetworkBattle() && !layer->isNetworkHost())
+			return;
+	}
+
 	if (isTower())
 	{
 		if (_hpBar)

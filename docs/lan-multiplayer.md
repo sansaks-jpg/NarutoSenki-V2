@@ -36,17 +36,22 @@ Lobby 1v1 mengadopsi sistem **POV Mirroring**:
 
 ## Authority model dan lifecycle thread
 
-Client tidak mengirim posisi final, HP, damage, hasil serangan, atau status menang. Client mengirim intent `InputCommand`; host memvalidasi command, memasukkannya ke simulation queue, dan mengirim `StateSnapshot`. Input lokal host dan input remote client menggunakan tipe command yang sama.
+Model authority **host-simulasi penuh** (protocol v2): hanya host yang memutuskan outcome gameplay. Client tidak pernah menghitung damage, mendorong state HURT/KNOCKDOWN, membunuh entity, menjalankan AI minion, atau menyimpulkan pemenang — semua itu diterima dari host. Yang disimulasikan client secara lokal hanyalah posisi hero miliknya (prediksi gerak), dan posisi tersebut dilaporkan ke host via `ClientState` sehingga host menyelesaikan combat dengan koordinat yang sama.
 
 ```text
-UI/HUD input
-  -> GameLayer / LanSession
-      -> LanProtocol validation
-          -> LanTransport UDP queue
-              -> host-authoritative session
-                  -> StateSnapshot
-                      -> client GameLayer presentation
+Client                          Host (satu-satunya simulator outcome)
+  input joystick  ── lokal ──>  posisi hero client
+  tombol jurus    ── Input ──>  eksekusi attack authoritative di mirror hero client
+  ClientState(10Hz) ─────────>  posisi/facing/state hero client
+  Snapshot(15Hz)  <──────────   heroes + towers + guardian + flogs + clock + verdict
 ```
+
+Aturan penekanan di kode:
+- `CharacterBase::acceptAttack()` dan `setDamage()` no-op pada client (`isNetworkBattle() && !isNetworkHost()`).
+- `HPBar::loseHP(percent <= 0)` pada client hanya mengosongkan bar; kill reward, spawn guardian, dan `dead()` hanya jalan di host.
+- Death/revive kedua hero berasal dari transisi byte `state` pada snapshot; `deadLabel`, fade mati, dan revive mengikuti host sehingga counter identik.
+- Flog/guardian: host mensimulasikan (`doAI`), client membuat mirror tanpa `doAI`; entity yang hilang dari snapshot di-`dead()`-kan lokal agar array bersih sama.
+- `checkTower()`: client early-return; host mengirim `MatchEnd(winnerGroup)` sebelum `onGameOver`.
 
 `LanTransport` memiliki worker native yang hanya menangani socket, encode/decode frame, dan queue event. Worker tidak boleh memanggil `Director`, `Node`, `Sprite`, scheduler, `GameLayer`, atau UI. `LanSession::poll()` menguras queue pada main thread melalui callback update. `LanNetworkRuntime::sharedLanSession()` mempertahankan session saat transisi lobby ke loading/battle.
 
@@ -54,7 +59,7 @@ Guard `networkActive()` memastikan `LanSession::poll()` dan `getRooms()` langsun
 
 ## Protocol dan validasi
 
-Frame terdiri atas magic `NSV2`, protocol version, message type, payload length, sequence, tick, dan payload. Payload dibatasi maksimum `64 KiB`, menggunakan integer little-endian, dan memakai string length-prefixed dengan batas panjang.
+Frame terdiri atas magic `NSV2`, protocol version (`2`), message type, payload length, sequence, tick, **ack** (piggyback cumulative ack input), dan payload. Payload dibatasi maksimum `64 KiB`, menggunakan integer little-endian, dan memakai string length-prefixed dengan batas panjang.
 
 | Pesan | Arah | Tujuan |
 |---|---|---|
@@ -65,20 +70,29 @@ Frame terdiri atas magic `NSV2`, protocol version, message type, payload length,
 | `Ready` | Client -> Host | Ready/unready client. |
 | `MatchStart` | Host -> Client | Mengunci match dan memulai loading. |
 | `Loaded`/`Ack` | Dua arah | Loaded barrier sebelum battle. |
-| `Input` | Client -> Host | Intent dengan tick, slot, action (`Move`, `NormalAttack`, `Skill1..5`, `Item1`), dan sequence. |
-| `Snapshot` | Host -> Client | State authoritative entity (posisi, HP, CKR, state animasi, facing direction). |
-| `Heartbeat` | Dua arah | Memantau peer aktif. |
+| `Input` | Client -> Host | Aksi diskrit (`NormalAttack`, `Skill1..5`, `Item1`) dengan sequence; diretransmit otomatis (~120 ms) sampai di-ack karena menentukan outcome. `Move` tidak lagi dikirim (posisi mengalir via Snapshot/ClientState). |
+| `Snapshot` | Host -> Client | World authoritative: hero (posisi, HP, CKR, state, facing), units (tower/guardian/flog: id, kind, variant, posisi, HP, state), detik pertandingan. |
+| `ClientState` | Client -> Host | State hero milik client (posisi/state/facing) ~10 Hz; divalidasi slot == 1. |
+| `MatchEnd` | Host -> Client | Verdict pemenang (GroupId) agar kedua device keluar match dengan hasil sama. |
+| `Heartbeat` | Dua arah | Memantau peer aktif; header ack tetap dipiggyback. |
 | `Leave`/`Disconnect` | Dua arah | Cleanup dan akhir session. |
 
-Payload melebihi `64 KiB`, message type tidak dikenal, protocol version mismatch, match id tidak cocok, player slot invalid, action invalid, dan input dengan sequence tidak meningkat harus ditolak sebelum masuk simulation. Duplicate atau input out-of-order tidak boleh merusak state host.
+Payload melebihi `64 KiB`, message type tidak dikenal, protocol version mismatch, match id tidak cocok, player slot invalid, action invalid, unit kind invalid, dan snapshot lebih lama dari yang sudah diterapkan (`tick <= lastApplied`) harus ditolak sebelum mengubah state. Duplicate atau input out-of-order tidak boleh merusak state host; retransmit out-of-order tetap diterima (sorted insert per slot) agar packet yang hilang bisa mengisi ulang celahnya.
 
 ## Battle bridge & Sinkronisasi Animasi
 
-`GameLayer::updateNetworkBattle()` menggunakan accumulator fixed-timestep di atas callback `update(dt)`. Render mengikuti frame rate perangkat, sedangkan tick network mengikuti `MatchConfig.tickRate`. Host memproses command dan mengirim snapshot posisi, HP, CKR, state, serta facing (`flipX`) untuk entity yang tersedia.
+`GameLayer::updateNetworkBattle()` menggunakan accumulator fixed-timestep di atas callback `update(dt)`. Render mengikuti frame rate perangkat, sedangkan tick network mengikuti `MatchConfig.tickRate`.
 
-Seluruh perintah aksi tempur didukung dan disinkronkan:
-- **Gerakan**: `ActionType::Move` disinkronkan secara kontinu; saat analog dilepas, perintah `(0, 0)` langsung memicu `character->idle()`.
-- **Serangan & Jurus**: `NormalAttack` (`NAttack`), `Skill1` (`SKILL1`), `Skill2` (`SKILL2`), `Skill3` (`SKILL3`), `Skill4` (`OUGIS1`), `Skill5` (`OUGIS2`), dan `Item1` (Ramen) langsung mengeksekusi animasi, konsumsi chakra, partikel efek, suara jurus, dan damage di kedua perangkat.
+Pembagian kerja per entity:
+
+- **Hero sendiri**: gerak disimulasikan lokal penuh (joystick → `walk`/`idle` langsung); tombol jurus dikirim via `Input` dan animasi jalan lewat echo command; HP/CKR/matinya murni dari snapshot.
+- **Hero lawan**: posisi di-interpolasi (`kNetInterpPeriod` 120 ms) menuju posisi snapshot; byte `state` memicu transisi `WALK`/`IDLE`; aksi diskrit direlay untuk animasi; host menyelesaikan damage-nya.
+- **Tower**: HP diperbarui dari unit snapshot (charId deterministik 1..N di kedua device).
+- **Guardian** (hardcore): hanya host yang spawn (`initGard`, nama via PRNG ber-seed `MatchConfig.seed`); client membuat mirror tanpa AI dari unit `variant` (bit0 nama, bit1 group).
+- **Flog/minion**: hanya host yang schedule & `doAI()`; tiap flog diberi id `300+` saat dibuat; client mirror dari snapshot (nama via tabel variant) dan mengeksekusi `dead()` ketika hilang dari snapshot. Tipe flog mengikuti kondisi tower versi host sehingga tidak pernah beda.
+- **Jam pertandingan**: `elapsedSeconds` pada snapshot menulis ulang `gameClock`/`totalTime` client.
+
+Seluruh perintah aksi tempur tetap didukung: `NormalAttack`, `Skill1..3`, `Skill4/5 (OUGIS)`, `Item1`. Di sisi host aksi client dieksekusi sebagai attack authoritative terhadap dunia host; di sisi client aksi host hanya visual karena semua penulisan outcome dicegah guard authority.
 
 ## Android, desktop, dan permission
 
@@ -121,7 +135,7 @@ APK rilis dibuat secara otomatis melalui workflow GitHub Actions `.github/workfl
 
 ## Known limitations
 
-MVP saat ini difokuskan pada mode 1v1 dua pemain. 3v3/4v4 multiplayer, reconnect otomatis saat terputus di tengah pertempuran, internet matchmaking di luar LAN, spectator mode, replay file, dan snapshot interpolation tingkat lanjut direncanakan untuk iterasi selanjutnya.
+MVP saat ini difokuskan pada mode 1v1 dua pemain. 3v3/4v4 multiplayer, reconnect otomatis saat terputus di tengah pertempuran, internet matchmaking di luar LAN, spectator mode, dan replay file direncanakan untuk iterasi selanjutnya. Batasan model v2: jika paket `MatchEnd` hilang, client tetap keluar match lewat jalur disconnect (dianggap menang); bullet/efek skill bersifat kosmetik di sisi client (outcome tetap dari host).
 
 ## Referensi
 

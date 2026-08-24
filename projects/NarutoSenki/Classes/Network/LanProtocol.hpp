@@ -7,8 +7,11 @@
 namespace nsv2::network
 {
 
-constexpr uint16_t kProtocolVersion = 1;
+constexpr uint16_t kProtocolVersion = 2;
 constexpr uint32_t kProtocolMagic = 0x3256534E; // "NSV2" in little-endian.
+// Frame layout: magic(u32) version(u16) type(u16) payloadLen(u32)
+//               sequence(u32) tick(u32) ack(u32).
+inline constexpr size_t kHeaderBytes = 24;
 constexpr uint32_t kMaxPayloadBytes = 64 * 1024;
 constexpr uint16_t kDefaultLanPort = 28765;
 constexpr uint16_t kDiscoveryPort = 28766;
@@ -36,6 +39,8 @@ enum class MessageType : uint16_t
     MatchEnd = 18,
     Resync = 19,
     Error = 20,
+    // Client -> Host authoritative state of the client-owned hero (v2).
+    ClientState = 21,
 };
 
 enum class ActionType : uint8_t
@@ -61,6 +66,9 @@ struct Message
     MessageType type = MessageType::Error;
     uint32_t sequence = 0;
     uint32_t tick = 0;
+    // Piggybacked cumulative ack: highest remote input sequence the sender has
+    // processed. Used to clear the reliable-retransmit queue.
+    uint32_t ack = 0;
     std::vector<uint8_t> payload;
 };
 
@@ -109,11 +117,39 @@ struct CharacterSnapshot
     bool flipped = false;
 };
 
+// Non-hero battlefield entities mirrored from the host simulation.
+// unitId namespaces: towers = 100 + charId, guardian = 200, flogs = 300+.
+enum class NetUnitKind : uint8_t
+{
+    FlogKonoha = 1,
+    FlogAkatsuki = 2,
+    Tower = 3,
+    Guardian = 4,
+};
+
+struct UnitSnapshot
+{
+    // uint16 namespaces: towers = charId (1..), guardian = 200, flogs = 300+.
+    uint16_t unitId = 0;
+    NetUnitKind kind = NetUnitKind::Tower;
+    // Flogs: index into the shared flog-name table. Guardian:
+    // bit0 = name (0 Roshi / 1 Han), bit1 = group (0 Konoha / 1 Akatsuki).
+    uint8_t variant = 0;
+    int32_t x = 0;
+    int32_t y = 0;
+    uint32_t hp = 0;
+    uint8_t state = 0;
+    bool flipped = false;
+};
+
 struct StateSnapshot
 {
     uint32_t matchId = 0;
     uint32_t tick = 0;
+    // Match clock in seconds as tracked by the snapshot sender (host).
+    uint16_t elapsedSeconds = 0;
     std::vector<CharacterSnapshot> characters;
+    std::vector<UnitSnapshot> units;
 };
 
 struct RoomAdvertisement

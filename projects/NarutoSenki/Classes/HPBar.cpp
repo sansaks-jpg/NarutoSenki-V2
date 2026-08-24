@@ -36,7 +36,13 @@ void HPBar::changeBar(const char *szImage)
 
 void HPBar::loseHP(float percent)
 {
-	if (getGameLayer()->_isHardCoreGame)
+	// Host-authoritative rule: on the LAN client this bar is display-only.
+	// Kill rewards, guardian spawning and dead() are resolved by the host and
+	// mirrored via snapshots.
+	auto *layer = getGameLayer();
+	const bool netClientMirror = layer && layer->isNetworkBattle() && !layer->isNetworkHost();
+
+	if (!netClientMirror && getGameLayer()->_isHardCoreGame)
 	{
 		auto gardTower = getGameLayer()->playerGroup == Group::Konoha
 							 ? TowerEnum::AkatsukiCenter
@@ -64,6 +70,15 @@ void HPBar::loseHP(float percent)
 
 	if (percent <= 0)
 	{
+		if (netClientMirror)
+		{
+			// Mirror only: empty the bar. The authoritative death arrives via
+			// the host snapshot (GameLayer applies state + counters).
+			auto s = ScaleTo::create(0.05f, 0.0f, 1);
+			hpBar->runAction(s);
+			return;
+		}
+
 		CharacterBase *_slayer = _delegate->_slayer;
 		CharacterBase *currentSlayer;
 

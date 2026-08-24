@@ -9,7 +9,6 @@ namespace nsv2::network
 {
 namespace
 {
-constexpr size_t kHeaderBytes = 20;
 constexpr uint16_t kMaxStringBytes = 1024;
 constexpr uint8_t kMaxSlots = 8;
 
@@ -132,7 +131,7 @@ private:
 bool validMessageType(uint16_t raw)
 {
     return raw >= static_cast<uint16_t>(MessageType::Hello) &&
-           raw <= static_cast<uint16_t>(MessageType::Error);
+           raw <= static_cast<uint16_t>(MessageType::ClientState);
 }
 
 bool validAction(uint8_t raw)
@@ -173,6 +172,7 @@ bool encodeMessage(const Message &message, std::vector<uint8_t> &out, std::strin
     putU32(out, static_cast<uint32_t>(message.payload.size()));
     putU32(out, message.sequence);
     putU32(out, message.tick);
+    putU32(out, message.ack);
     out.insert(out.end(), message.payload.begin(), message.payload.end());
     return true;
 }
@@ -192,7 +192,8 @@ bool decodeMessage(const uint8_t *data, size_t size, Message &out, size_t &consu
     uint16_t rawType = 0;
     uint32_t payloadLength = 0;
     if (!reader.u32(magic) || !reader.u16(version) || !reader.u16(rawType) ||
-        !reader.u32(payloadLength) || !reader.u32(out.sequence) || !reader.u32(out.tick))
+        !reader.u32(payloadLength) || !reader.u32(out.sequence) || !reader.u32(out.tick) ||
+        !reader.u32(out.ack))
     {
         fail(error, "incomplete message header");
         return false;
@@ -368,7 +369,7 @@ bool encodeRoomAdvertisement(const RoomAdvertisement &room, std::vector<uint8_t>
 
 bool encodeStateSnapshot(const StateSnapshot &snapshot, std::vector<uint8_t> &out, std::string *error)
 {
-    if (snapshot.characters.size() > kMaxSlots)
+    if (snapshot.characters.size() > kMaxSlots || snapshot.units.size() > 255)
     {
         fail(error, "snapshot entity count exceeds protocol limit");
         return false;
@@ -376,6 +377,7 @@ bool encodeStateSnapshot(const StateSnapshot &snapshot, std::vector<uint8_t> &ou
     out.clear();
     putU32(out, snapshot.matchId);
     putU32(out, snapshot.tick);
+    putU16(out, snapshot.elapsedSeconds);
     putU8(out, static_cast<uint8_t>(snapshot.characters.size()));
     for (const auto &character : snapshot.characters)
     {
@@ -387,6 +389,18 @@ bool encodeStateSnapshot(const StateSnapshot &snapshot, std::vector<uint8_t> &ou
         putU8(out, character.state);
         putU8(out, character.flipped ? 1 : 0);
     }
+    putU8(out, static_cast<uint8_t>(snapshot.units.size()));
+    for (const auto &unit : snapshot.units)
+    {
+        putU16(out, unit.unitId);
+        putU8(out, static_cast<uint8_t>(unit.kind));
+        putU8(out, unit.variant);
+        putI32(out, unit.x);
+        putI32(out, unit.y);
+        putU32(out, unit.hp);
+        putU8(out, unit.state);
+        putU8(out, unit.flipped ? 1 : 0);
+    }
     return out.size() <= kMaxPayloadBytes || (fail(error, "snapshot exceeds protocol limit"), false);
 }
 
@@ -394,7 +408,9 @@ bool decodeStateSnapshot(const std::vector<uint8_t> &data, StateSnapshot &out, s
 {
     Reader reader(data.data(), data.size());
     uint8_t count = 0;
-    if (!reader.u32(out.matchId) || !reader.u32(out.tick) || !reader.u8(count) || count > kMaxSlots)
+    uint8_t unitCount = 0;
+    if (!reader.u32(out.matchId) || !reader.u32(out.tick) || !reader.u16(out.elapsedSeconds) ||
+        !reader.u8(count) || count > kMaxSlots)
     {
         fail(error, "invalid snapshot header");
         return false;
@@ -414,6 +430,31 @@ bool decodeStateSnapshot(const std::vector<uint8_t> &data, StateSnapshot &out, s
         }
         character.flipped = flipped != 0;
         out.characters.push_back(character);
+    }
+    if (!reader.u8(unitCount))
+    {
+        fail(error, "incomplete snapshot unit header");
+        return false;
+    }
+    out.units.clear();
+    out.units.reserve(unitCount);
+    for (uint8_t i = 0; i < unitCount; ++i)
+    {
+        UnitSnapshot unit;
+        uint8_t flipped = 0;
+        uint8_t rawKind = 0;
+        if (!reader.u16(unit.unitId) || !reader.u8(rawKind) || !reader.u8(unit.variant) ||
+            !reader.i32(unit.x) || !reader.i32(unit.y) || !reader.u32(unit.hp) ||
+            !reader.u8(unit.state) || !reader.u8(flipped) || flipped > 1 ||
+            rawKind < static_cast<uint8_t>(NetUnitKind::FlogKonoha) ||
+            rawKind > static_cast<uint8_t>(NetUnitKind::Guardian))
+        {
+            fail(error, "incomplete snapshot unit");
+            return false;
+        }
+        unit.kind = static_cast<NetUnitKind>(rawKind);
+        unit.flipped = flipped != 0;
+        out.units.push_back(unit);
     }
     return decodeReaderResult(reader, error);
 }

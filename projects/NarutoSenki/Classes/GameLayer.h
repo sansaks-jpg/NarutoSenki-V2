@@ -4,6 +4,7 @@
 #include "PauseLayer.h"
 #include "Network/LanProtocol.hpp"
 #include "Data/UnitData.h"
+#include <map>
 #include <memory>
 
 #if (CC_TARGET_PLATFORM == CC_PLATFORM_WIN32)
@@ -118,9 +119,16 @@ public:
 	void attackButtonRelease();
 
 	void enableNetworkBattle(uint8_t localSlot);
+	bool isNetworkHost() const { return _isNetworkHost; }
 	void updateNetworkBattle(float dt);
 	void applyNetworkCommand(const nsv2::network::InputCommand &command);
-	void applyNetworkSnapshot(const nsv2::network::StateSnapshot &snapshot);
+	// Host side: applies the client-reported state of the client-owned hero.
+	void applyClientState(const nsv2::network::StateSnapshot &state);
+	// Client side: reconciles host-authoritative flogs/towers/guardian mirrors.
+	void applyNetworkUnits(const std::vector<nsv2::network::UnitSnapshot> &units);
+	// Deterministic PRNG seeded from MatchConfig::seed (replaces raw rand() for
+	// decisions that must match across devices).
+	uint32_t netRandom(uint32_t bound);
 
 	void JoyStickRelease();
 	void JoyStickUpdate(Vec2 direction);
@@ -217,6 +225,34 @@ private:
 	float _networkAccumulator = 0.0f;
 	float _lastNetworkJoystickSendTime = 0.0f;
 	float _networkBattleTime = 0.0f;
+
+	// --- Host-authoritative network battle state ---
+	bool _isNetworkHost = false;
+	// Stale-snapshot guard: only strictly newer snapshots are applied.
+	uint32_t _netLastAppliedTick = 0;
+	// Last authoritative State per hero slot (State enum as uint8_t).
+	uint8_t _netLastCharState[2] = {0, 0};
+	static constexpr float kNetInterpPeriod = 0.12f;
+	struct NetLerp
+	{
+		Vec2 from;
+		Vec2 to;
+		float t = 1.0f;
+	};
+	std::map<int, NetLerp> _netCharLerp; // key: hero slot (0/1)
+	std::map<int, NetLerp> _netUnitLerp; // key: network unitId
+	std::map<int, Flog *> _netFlogMirrors; // unitId -> client-side flog mirror
+	CharacterBase *_netGuardianMirror = nullptr;
+	int _netGuardianUnitId = -1;
+	uint16_t _netNextFlogId = 0;
+	uint32_t _netRngState = 1;
+
+	void advanceNetworkInterpolation(float dt);
+	void applyCharacterSnapshot(const nsv2::network::CharacterSnapshot &state);
+	void buildAndSendHostSnapshot();
+	void sendLocalClientState();
+	vector<Flog *> *flogArrayForKind(uint8_t kind);
+
 	vector<OnHUDInitializedCallback> callbackssList;
 
 	std::unique_ptr<BattleRuntimeSystem> _battleRuntimeSystem;

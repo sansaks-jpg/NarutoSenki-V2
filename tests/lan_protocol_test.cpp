@@ -1,3 +1,4 @@
+// Protocol unit tests for the LAN multiplayer wire format (v2).
 #include "Network/LanProtocol.hpp"
 
 #include <cassert>
@@ -30,6 +31,28 @@ void testMessageRoundTrip()
     assert(decoded.sequence == source.sequence);
     assert(decoded.tick == source.tick);
     assert(decoded.payload == source.payload);
+}
+
+void testMessageAckRoundTrip()
+{
+    // v2: every frame carries a piggybacked cumulative input ack.
+    Message source;
+    source.type = MessageType::ClientState;
+    source.sequence = 7;
+    source.tick = 9;
+    source.ack = 42;
+    source.payload = {1, 2, 3};
+
+    std::vector<uint8_t> bytes;
+    std::string error;
+    assert(encodeMessage(source, bytes, &error));
+
+    Message decoded;
+    size_t consumed = 0;
+    assert(decodeMessage(bytes.data(), bytes.size(), decoded, consumed, &error));
+    assert(consumed == bytes.size());
+    assert(decoded.type == MessageType::ClientState);
+    assert(decoded.sequence == 7 && decoded.tick == 9 && decoded.ack == 42);
 }
 
 void testMatchConfigRoundTrip()
@@ -77,9 +100,42 @@ void testSnapshotRoundTrip()
     assert(decodeStateSnapshot(bytes, decoded, &error));
     assert(decoded.matchId == source.matchId);
     assert(decoded.tick == source.tick);
+    assert(decoded.elapsedSeconds == 0);
+    assert(decoded.units.empty());
     assert(decoded.characters.size() == 2);
     assert(decoded.characters[1].x == 4321);
     assert(decoded.characters[1].flipped);
+}
+
+void testSnapshotUnitsRoundTrip()
+{
+    // v2: snapshots carry battlefield units and the match clock.
+    StateSnapshot source;
+    source.matchId = 1234;
+    source.tick = 30;
+    source.elapsedSeconds = 125;
+    source.characters.push_back({0, 280000, 8000, 50000, 12000, 3, false});
+    source.units.push_back({1, NetUnitKind::Tower, 0, 500, 600, 40000, 0, false});
+    source.units.push_back({200, NetUnitKind::Guardian, static_cast<uint8_t>(1 | 2), 272, 80, 9999, 4, true});
+    source.units.push_back({305, NetUnitKind::FlogAkatsuki, 4, 2656, 120, 300, 1, false});
+
+    std::vector<uint8_t> bytes;
+    std::string error;
+    assert(encodeStateSnapshot(source, bytes, &error));
+
+    StateSnapshot decoded;
+    assert(decodeStateSnapshot(bytes, decoded, &error));
+    assert(decoded.elapsedSeconds == 125);
+    assert(decoded.units.size() == 3);
+    assert(decoded.units[0].unitId == 1 && decoded.units[0].kind == NetUnitKind::Tower);
+    assert(decoded.units[1].unitId == 200 && decoded.units[1].kind == NetUnitKind::Guardian);
+    assert(decoded.units[1].variant == 3); // Han (bit0) + Akatsuki (bit1)
+    assert(decoded.units[1].flipped);
+    assert(decoded.units[2].unitId == 305 && decoded.units[2].kind == NetUnitKind::FlogAkatsuki);
+
+    // Truncated payload must fail cleanly instead of crashing.
+    StateSnapshot bad;
+    assert(!decodeStateSnapshot(std::vector<uint8_t>(bytes.begin(), bytes.begin() + 10), bad, &error));
 }
 
 void testInputRoundTrip()
@@ -127,7 +183,7 @@ void testRejectsOversizedPayload()
     assert(!encodeMessage(source, bytes, &error));
     assert(error == "payload exceeds protocol limit");
 
-    bytes.assign(20 + kMaxPayloadBytes + 1, 0);
+    bytes.assign(kHeaderBytes + kMaxPayloadBytes + 1, 0);
     bytes[0] = 0x4E;
     bytes[1] = 0x53;
     bytes[2] = 0x56;
@@ -169,6 +225,27 @@ void testRejectsUnknownTypeAndVersion()
     assert(error == "unsupported protocol version");
 }
 
+void testAcceptsNewestMessageType()
+{
+    // v2 boundary: ClientState is the newest valid type; Error+1 must fail.
+    Message source;
+    source.type = MessageType::ClientState;
+    source.payload = {1};
+    std::vector<uint8_t> bytes;
+    std::string error;
+    assert(encodeMessage(source, bytes, &error));
+    Message decoded;
+    size_t consumed = 0;
+    assert(decodeMessage(bytes.data(), bytes.size(), decoded, consumed, &error));
+
+    assert(encodeMessage(source, bytes, &error));
+    const uint16_t invalidType = static_cast<uint16_t>(MessageType::ClientState) + 1;
+    bytes[6] = static_cast<uint8_t>(invalidType & 0xFF);
+    bytes[7] = static_cast<uint8_t>(invalidType >> 8);
+    assert(!decodeMessage(bytes.data(), bytes.size(), decoded, consumed, &error));
+    assert(error == "unknown message type");
+}
+
 void testRejectsMalformedFrames()
 {
     Message decoded;
@@ -191,11 +268,14 @@ void testRejectsMalformedFrames()
 int main()
 {
     testMessageRoundTrip();
+    testMessageAckRoundTrip();
     testMatchConfigRoundTrip();
     testInputRoundTrip();
     testSnapshotRoundTrip();
+    testSnapshotUnitsRoundTrip();
     testRejectsOversizedPayload();
     testRejectsUnknownTypeAndVersion();
+    testAcceptsNewestMessageType();
     testRejectsMalformedFrames();
     std::cout << "lan_protocol_test: ok\n";
     return 0;

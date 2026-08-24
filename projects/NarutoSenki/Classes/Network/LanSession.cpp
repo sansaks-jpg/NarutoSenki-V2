@@ -168,7 +168,11 @@ bool LanSession::sendToRemote(const Message &message, std::string *error)
             *error = "remote peer is not known";
         return false;
     }
-    return _transport.send(message, _remoteAddress, _remotePort, error);
+    // Piggyback the cumulative input ack on every outbound message so the
+    // peer's reliable queue can be cleared without dedicated Ack packets.
+    Message stamped = message;
+    stamped.ack = _lastRemoteInputSequence;
+    return _transport.send(stamped, _remoteAddress, _remotePort, error);
 }
 
 void LanSession::sendLobbyUpdate()
@@ -346,6 +350,33 @@ bool LanSession::validateInput(const InputCommand &command, std::string *error) 
     return true;
 }
 
+bool LanSession::tryAcceptRemoteSequence(uint32_t sequence)
+{
+    if (_remoteSequenceWatermark == 0)
+    {
+        // First input from the peer.
+        _remoteSequenceWatermark = sequence;
+        _remoteRecentMask = 1;
+        return true;
+    }
+    if (sequence > _remoteSequenceWatermark)
+    {
+        const uint32_t jump = sequence - _remoteSequenceWatermark;
+        _remoteRecentMask = jump >= 64 ? 0 : (_remoteRecentMask << jump);
+        _remoteRecentMask |= 1;
+        _remoteSequenceWatermark = sequence;
+        return true;
+    }
+    const uint64_t offset = _remoteSequenceWatermark - sequence;
+    if (offset >= 64)
+        return false; // ancient replay beyond the window
+    const uint64_t bit = 1ULL << offset;
+    if (_remoteRecentMask & bit)
+        return false; // already accepted/applied
+    _remoteRecentMask |= bit;
+    return true;
+}
+
 bool LanSession::submitInput(const InputCommand &command, std::string *error)
 {
     InputCommand normalized = command;
@@ -363,7 +394,20 @@ bool LanSession::submitInput(const InputCommand &command, std::string *error)
         message.sequence = normalized.sequence;
         message.tick = normalized.tick;
         if (encodeInputCommand(normalized, message.payload, error))
+        {
             sendToRemote(message, error);
+            // Discrete actions (attacks/skills/items) must not be lost to UDP:
+            // a silently dropped attack desyncs both simulations. Movement is
+            // intentionally fire-and-forget; positions are synced via
+            // Snapshot/ClientState instead.
+            if (normalized.action != ActionType::Move)
+            {
+                PendingReliable pending;
+                pending.message = std::move(message);
+                pending.lastSendMs = nowMs();
+                _pendingReliable.push_back(std::move(pending));
+            }
+        }
     }
     _inputCommands.push_back(normalized);
     return true;
@@ -405,10 +449,66 @@ void LanSession::drainSnapshots(std::vector<StateSnapshot> &snapshots)
     }
 }
 
+bool LanSession::sendClientState(const StateSnapshot &state, std::string *error)
+{
+    if (_role != SessionRole::Client || _state != SessionState::Battle ||
+        state.matchId != _config.matchId || state.characters.size() != 1 ||
+        state.characters[0].slot != _localSlot)
+    {
+        if (error)
+            *error = "client state hanya dapat dikirim client untuk hero miliknya";
+        return false;
+    }
+    Message message;
+    message.type = MessageType::ClientState;
+    message.sequence = _nextSequence++;
+    message.tick = state.tick;
+    if (!encodeStateSnapshot(state, message.payload, error))
+        return false;
+    return sendToRemote(message, error);
+}
+
+void LanSession::drainClientStates(std::vector<StateSnapshot> &states)
+{
+    while (!_clientStates.empty())
+    {
+        states.push_back(std::move(_clientStates.front()));
+        _clientStates.pop_front();
+    }
+}
+
+bool LanSession::sendMatchEnd(uint8_t winnerGroup, std::string *error)
+{
+    if (_role != SessionRole::Host || _state != SessionState::Battle)
+    {
+        if (error)
+            *error = "match end hanya dapat dikirim host saat battle";
+        return false;
+    }
+    Message message;
+    message.type = MessageType::MatchEnd;
+    message.sequence = _nextSequence++;
+    message.payload.push_back(winnerGroup);
+    // Sent best-effort; the battle disconnect path still ends the match on the
+    // client if this packet is lost.
+    return sendToRemote(message, error);
+}
+
+void LanSession::drainMatchEnds(std::vector<uint8_t> &winners)
+{
+    while (!_matchEnds.empty())
+    {
+        winners.push_back(std::move(_matchEnds.front()));
+        _matchEnds.pop_front();
+    }
+}
+
 void LanSession::handleMessage(const TransportEvent &event)
 {
     _lastReceiveMs = nowMs();
     const Message &message = event.message;
+    if (message.ack > _lastAckedByRemote)
+        _lastAckedByRemote = message.ack;
     if (message.type == MessageType::Heartbeat)
         return;
     if (_role == SessionRole::Host && message.type == MessageType::Hello && !_remoteConnected)
@@ -496,11 +596,34 @@ void LanSession::handleMessage(const TransportEvent &event)
         std::string error;
         const uint8_t expectedSlot = (_role == SessionRole::Host) ? 1 : 0;
         if (!decodeInputCommand(message.payload, command, &error) ||
-            command.playerSlot != expectedSlot || command.sequence <= _lastRemoteInputSequence ||
-            !validateInput(command, &error))
+            command.playerSlot != expectedSlot || !validateInput(command, &error))
             return;
-        _lastRemoteInputSequence = command.sequence;
+        // Reject duplicates/replays (including already-applied inputs) while
+        // still accepting late retransmits that fill a lost packet's gap.
+        if (!tryAcceptRemoteSequence(command.sequence))
+            return;
+        if (command.sequence > _lastRemoteInputSequence)
+            _lastRemoteInputSequence = command.sequence;
         _inputCommands.push_back(std::move(command));
+        return;
+    }
+
+    if (_role == SessionRole::Host && message.type == MessageType::ClientState &&
+        _remoteConnected && _state == SessionState::Battle)
+    {
+        StateSnapshot state;
+        std::string error;
+        if (decodeStateSnapshot(message.payload, state, &error) &&
+            state.matchId == _config.matchId && !state.characters.empty() &&
+            state.characters[0].slot == 1)
+            _clientStates.push_back(std::move(state));
+        return;
+    }
+
+    if (message.type == MessageType::MatchEnd && _state == SessionState::Battle &&
+        message.payload.size() == 1 && message.payload[0] <= 1)
+    {
+        _matchEnds.push_back(message.payload[0]);
         return;
     }
 
@@ -612,6 +735,7 @@ void LanSession::poll()
     _discovery.poll(ignoredRooms);
 
     const uint64_t currentMs = nowMs();
+    processReliableQueue(currentMs);
 
     if (_remoteConnected && currentMs >= _lastHeartbeatMs && (currentMs - _lastHeartbeatMs >= 1000))
     {
@@ -668,6 +792,34 @@ void LanSession::poll()
     }
 }
 
+void LanSession::processReliableQueue(uint64_t currentMs)
+{
+    if (_pendingReliable.empty())
+        return;
+
+    constexpr uint64_t kReliableResendIntervalMs = 120;
+    constexpr int kReliableMaxAttempts = 25;
+
+    std::vector<PendingReliable> stillPending;
+    stillPending.reserve(_pendingReliable.size());
+    for (auto &pending : _pendingReliable)
+    {
+        // Cleared once the peer acks our sequence via any piggybacked ack.
+        if (pending.message.sequence <= _lastAckedByRemote ||
+            pending.attempts >= kReliableMaxAttempts)
+            continue;
+        if (currentMs - pending.lastSendMs >= kReliableResendIntervalMs)
+        {
+            std::string ignored;
+            sendToRemote(pending.message, &ignored);
+            pending.lastSendMs = currentMs;
+            ++pending.attempts;
+        }
+        stillPending.push_back(std::move(pending));
+    }
+    _pendingReliable = std::move(stillPending);
+}
+
 bool LanSession::startScan(std::string *error)
 {
     return _discovery.startScanning(error);
@@ -696,6 +848,19 @@ void LanSession::drainNotices(std::vector<SessionNotice> &notices)
     }
 }
 
+void LanSession::clearBattleQueues()
+{
+    _inputCommands.clear();
+    _snapshots.clear();
+    _clientStates.clear();
+    _matchEnds.clear();
+    _pendingReliable.clear();
+    _lastRemoteInputSequence = 0;
+    _lastAckedByRemote = 0;
+    _remoteRecentMask = 0;
+    _remoteSequenceWatermark = 0;
+}
+
 void LanSession::stop()
 {
     if (_role != SessionRole::None && _remoteConnected)
@@ -717,9 +882,7 @@ void LanSession::stop()
     _remoteAddress.clear();
     _remotePort = 0;
     _config = {};
-    _inputCommands.clear();
-    _snapshots.clear();
-    _lastRemoteInputSequence = 0;
+    clearBattleQueues();
     _sessionStartedMs = 0;
     _lastReceiveMs = 0;
     _lastHeartbeatMs = 0;

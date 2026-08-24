@@ -37,6 +37,24 @@ struct SessionNotice
     std::string text;
 };
 
+struct SessionDiagnostics
+{
+    uint32_t matchId = 0;
+    SessionRole role = SessionRole::None;
+    SessionState state = SessionState::Idle;
+    std::string remoteAddress;
+    uint16_t remotePort = 0;
+    bool remoteConnected = false;
+    uint32_t lastRemoteInputSequence = 0;
+    uint32_t lastAckedByRemote = 0;
+    uint32_t remoteSequenceWatermark = 0;
+    size_t pendingReliableCount = 0;
+    size_t inputQueueDepth = 0;
+    size_t snapshotQueueDepth = 0;
+    uint64_t lastReceiveMs = 0;
+    uint64_t lastHeartbeatMs = 0;
+};
+
 class LanSession
 {
 public:
@@ -75,6 +93,7 @@ public:
     void drainMatchEnds(std::vector<uint8_t> &winners);
 
     void drainNotices(std::vector<SessionNotice> &notices);
+    void getDiagnostics(SessionDiagnostics &out) const;
     SessionRole role() const { return _role; }
     SessionState state() const { return _state; }
     const MatchConfig &matchConfig() const { return _config; }

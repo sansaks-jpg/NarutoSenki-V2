@@ -13,6 +13,8 @@
 #include "Systems/SpawnSystem.hpp"
 #include "Systems/SessionState.hpp"
 #include "Network/LanNetworkRuntime.hpp"
+#include "Network/AuthoritativeBattleState.hpp"
+#include "Network/NetworkPresentationAdapter.hpp"
 
 #include <set>
 
@@ -780,12 +782,26 @@ void GameLayer::enableNetworkBattle(uint8_t localSlot)
 	_netFlogMirrors.clear();
 	_netGuardianMirror = nullptr;
 	_netGuardianUnitId = -1;
+
+	_netPresentation = std::make_unique<nsv2::network::NetworkPresentationAdapter>();
+	_netPresentation->initialize(this, _networkLocalSlot);
+
+	if (_isNetworkHost)
+	{
+		_authBattleState = std::make_unique<nsv2::network::AuthoritativeBattleState>();
+		_authBattleState->initializeMatch(nsv2::network::sharedLanSession().matchConfig());
+	}
 }
 
 void GameLayer::advanceNetworkInterpolation(float dt)
 {
 	if (!_networkBattle || _isNetworkHost)
 		return;
+
+	if (_netPresentation)
+	{
+		_netPresentation->update(dt);
+	}
 
 	const float advance = dt / kNetInterpPeriod;
 	auto stepLerp = [advance](NetLerp &lerp) {
@@ -795,12 +811,6 @@ void GameLayer::advanceNetworkInterpolation(float dt)
 					lerp.from.y * (1.0f - k) + lerp.to.y * k);
 	};
 
-	for (auto &entry : _netCharLerp)
-	{
-		if (entry.first >= static_cast<int>(_CharacterArray.size()) || !_CharacterArray[entry.first])
-			continue;
-		_CharacterArray[entry.first]->setPosition(stepLerp(entry.second));
-	}
 	for (auto &entry : _netUnitLerp)
 	{
 		Vec2 position;
@@ -828,6 +838,7 @@ void GameLayer::buildAndSendHostSnapshot()
 	snapshot.matchId = session.matchConfig().matchId;
 	snapshot.tick = _networkTick;
 	snapshot.elapsedSeconds = static_cast<uint16_t>(MIN(static_cast<uint32_t>(0xFFFF), getTotalTime()));
+	snapshot.sessionEpoch = session.matchConfig().seed ^ snapshot.matchId;
 
 	for (size_t i = 0; i < _CharacterArray.size() && i < session.matchConfig().maxPlayers; ++i)
 	{
@@ -883,6 +894,13 @@ void GameLayer::buildAndSendHostSnapshot()
 		}
 	}
 
+	if (_authBattleState)
+	{
+		_authBattleState->drainCombatEvents(snapshot.combatEvents);
+	}
+
+	snapshot.stateChecksum = computeStateChecksum(snapshot);
+
 	std::string error;
 	session.sendSnapshot(snapshot, &error);
 }
@@ -931,7 +949,13 @@ void GameLayer::updateNetworkBattle(float dt)
 	std::vector<InputCommand> commands;
 	session.drainInputCommands(commands);
 	for (const auto &command : commands)
+	{
 		applyNetworkCommand(command);
+		if (_isNetworkHost && _authBattleState)
+		{
+			_authBattleState->submitPlayerInput(command);
+		}
+	}
 
 	// Smooth remote entity rendering between snapshots.
 	advanceNetworkInterpolation(dt);
@@ -946,6 +970,11 @@ void GameLayer::updateNetworkBattle(float dt)
 
 		if (_isNetworkHost)
 		{
+			if (_authBattleState)
+			{
+				_authBattleState->stepSimulation(_networkTick);
+			}
+
 			// Host broadcast at half tick rate (~15 Hz).
 			if (_networkTick % 2 == 0)
 				buildAndSendHostSnapshot();
@@ -987,6 +1016,12 @@ void GameLayer::updateNetworkBattle(float dt)
 			if (snapshot.tick <= _netLastAppliedTick)
 				continue;
 			_netLastAppliedTick = snapshot.tick;
+
+			if (_netPresentation)
+			{
+				_netPresentation->applyAuthoritativeSnapshot(snapshot, currentPlayer ? currentPlayer->getSpeed() : 3.0f);
+			}
+
 			for (const auto &charState : snapshot.characters)
 				applyCharacterSnapshot(charState);
 			applyNetworkUnits(snapshot.units);
@@ -1285,12 +1320,19 @@ void GameLayer::applyNetworkUnits(const std::vector<nsv2::network::UnitSnapshot>
 
 void GameLayer::JoyStickRelease()
 {
-	// In network battles movement is simulated locally on each device and the
-	// authoritative position flows via Snapshot/ClientState, so no Move packet
-	// is needed here anymore.
 	if (currentPlayer && currentPlayer->getState() == State::WALK)
 	{
 		currentPlayer->idle();
+	}
+	if (_networkBattle)
+	{
+		nsv2::network::InputCommand command;
+		command.tick = _networkTick;
+		command.action = nsv2::network::ActionType::Move;
+		command.axisX = 0;
+		command.axisY = 0;
+		command.isDiscreteAction = true;
+		nsv2::network::sharedLanSession().submitInput(command);
 	}
 }
 
@@ -1298,8 +1340,23 @@ void GameLayer::JoyStickUpdate(Vec2 direction)
 {
 	if (!ougisChar)
 	{
-		// CCLOG("x:%f,y:%f",direction.x,direction.y);
 		currentPlayer->walk(direction);
+		if (_networkBattle && (_networkBattleTime - _lastNetworkJoystickSendTime >= 0.033f))
+		{
+			_lastNetworkJoystickSendTime = _networkBattleTime;
+			nsv2::network::InputCommand command;
+			command.tick = _networkTick;
+			command.action = nsv2::network::ActionType::Move;
+			command.axisX = static_cast<int16_t>(std::clamp(direction.x * 1000.0f, -1000.0f, 1000.0f));
+			command.axisY = static_cast<int16_t>(std::clamp(direction.y * 1000.0f, -1000.0f, 1000.0f));
+			command.isDiscreteAction = false;
+			nsv2::network::sharedLanSession().submitInput(command);
+
+			if (_netPresentation && currentPlayer)
+			{
+				_netPresentation->recordPredictedInput(command.sequence, command.tick, command.axisX, command.axisY, currentPlayer->getSpeed(), 0.033f);
+			}
+		}
 	}
 }
 
@@ -1309,6 +1366,7 @@ void GameLayer::attackButtonClick(ABType type)
 	{
 		nsv2::network::InputCommand command;
 		command.tick = _networkTick;
+		command.isDiscreteAction = true;
 		if (type == NAttack)
 		{
 			_isAttackButtonRelease = false;
@@ -1330,6 +1388,12 @@ void GameLayer::attackButtonClick(ABType type)
 			return;
 
 		nsv2::network::sharedLanSession().submitInput(command);
+
+		// Local responsive trigger for client/host
+		if (type == Item1)
+			currentPlayer->setItem(type);
+		else
+			currentPlayer->attack(type);
 		return;
 	}
 	if (type == NAttack)
@@ -1467,8 +1531,13 @@ void GameLayer::onGameOver(bool isWin)
 void GameLayer::onLeft()
 {
 	if (_networkBattle)
+	{
 		nsv2::network::sharedLanSession().stop();
-	CCNotificationCenter::sharedNotificationCenter()->purgeNotificationCenter();
+		_networkBattle = false;
+	}
+
+	unscheduleUpdate();
+	unscheduleAllSelectors();
 
 	CCArray *childArray = getChildren();
 	Ref *pObject;
@@ -1501,7 +1570,8 @@ void GameLayer::onLeft()
 	removeSprites("UI.plist");
 	removeSprites("Map.plist");
 
-	SimpleAudioEngine::sharedEngine()->end();
+	SimpleAudioEngine::sharedEngine()->stopAllEffects();
+	SimpleAudioEngine::sharedEngine()->stopBackgroundMusic(true);
 
 	lua_call_func(UiFlowKeys::kOnGameOver);
 }

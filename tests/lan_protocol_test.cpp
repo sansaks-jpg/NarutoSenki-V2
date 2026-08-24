@@ -148,6 +148,7 @@ void testInputRoundTrip()
     source.action = ActionType::Move;
     source.axisX = -1000;
     source.axisY = 1000;
+    source.isDiscreteAction = true;
 
     std::vector<uint8_t> bytes;
     std::string error;
@@ -160,17 +161,51 @@ void testInputRoundTrip()
     assert(decoded.playerSlot == source.playerSlot);
     assert(decoded.axisX == source.axisX);
     assert(decoded.axisY == source.axisY);
+    assert(decoded.isDiscreteAction == true);
 
     // Test Skill actions
     source.action = ActionType::Skill1;
+    source.isDiscreteAction = false;
     assert(encodeInputCommand(source, bytes, &error));
     assert(decodeInputCommand(bytes, decoded, &error));
     assert(decoded.action == ActionType::Skill1);
+    assert(!decoded.isDiscreteAction);
 
     source.action = ActionType::Item1;
     assert(encodeInputCommand(source, bytes, &error));
     assert(decodeInputCommand(bytes, decoded, &error));
     assert(decoded.action == ActionType::Item1);
+}
+
+void testCombatEventsAndChecksumRoundTrip()
+{
+    StateSnapshot source;
+    source.matchId = 99;
+    source.tick = 100;
+    source.elapsedSeconds = 45;
+    source.sessionEpoch = 123456;
+    source.clientSequenceWatermark = 77;
+    source.characters.push_back({0, 1000, 2000, 5000, 100, 1, false});
+    source.combatEvents.push_back({1, 100, CombatEventType::HitImpact, 0, 1, -250, 120, 30});
+    source.combatEvents.push_back({2, 100, CombatEventType::KnockbackApplied, 0, 1, 15, 120, 30});
+    source.stateChecksum = computeStateChecksum(source);
+    assert(source.stateChecksum != 0);
+
+    std::vector<uint8_t> bytes;
+    std::string error;
+    assert(encodeStateSnapshot(source, bytes, &error));
+
+    StateSnapshot decoded;
+    assert(decodeStateSnapshot(bytes, decoded, &error));
+    assert(decoded.matchId == 99);
+    assert(decoded.sessionEpoch == 123456);
+    assert(decoded.clientSequenceWatermark == 77);
+    assert(decoded.stateChecksum == source.stateChecksum);
+    assert(decoded.combatEvents.size() == 2);
+    assert(decoded.combatEvents[0].eventId == 1);
+    assert(decoded.combatEvents[0].eventType == CombatEventType::HitImpact);
+    assert(decoded.combatEvents[0].value == -250);
+    assert(decoded.combatEvents[1].eventType == CombatEventType::KnockbackApplied);
 }
 
 void testRejectsOversizedPayload()
@@ -227,7 +262,7 @@ void testRejectsUnknownTypeAndVersion()
 
 void testAcceptsNewestMessageType()
 {
-    // v2 boundary: ClientState is the newest valid type; Error+1 must fail.
+    // v3 boundary: ClientState is the newest valid type; Error+1 must fail.
     Message source;
     source.type = MessageType::ClientState;
     source.payload = {1};
@@ -273,10 +308,11 @@ int main()
     testInputRoundTrip();
     testSnapshotRoundTrip();
     testSnapshotUnitsRoundTrip();
+    testCombatEventsAndChecksumRoundTrip();
     testRejectsOversizedPayload();
     testRejectsUnknownTypeAndVersion();
     testAcceptsNewestMessageType();
     testRejectsMalformedFrames();
-    std::cout << "lan_protocol_test: ok\n";
+    std::cout << "lan_protocol_test: ok (v3)\n";
     return 0;
 }

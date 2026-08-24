@@ -7,7 +7,7 @@
 namespace nsv2::network
 {
 
-constexpr uint16_t kProtocolVersion = 2;
+constexpr uint16_t kProtocolVersion = 3;
 constexpr uint32_t kProtocolMagic = 0x3256534E; // "NSV2" in little-endian.
 // Frame layout: magic(u32) version(u16) type(u16) payloadLen(u32)
 //               sequence(u32) tick(u32) ack(u32).
@@ -39,7 +39,7 @@ enum class MessageType : uint16_t
     MatchEnd = 18,
     Resync = 19,
     Error = 20,
-    // Client -> Host authoritative state of the client-owned hero (v2).
+    // Client -> Host authoritative state of the client-owned hero (v2/v3).
     ClientState = 21,
 };
 
@@ -53,6 +53,17 @@ enum class ActionType : uint8_t
     Skill4 = 6,
     Skill5 = 7,
     Item1 = 8,
+};
+
+enum class CombatEventType : uint8_t
+{
+    None = 0,
+    AttackConfirmed = 1,
+    HitImpact = 2,
+    KnockbackApplied = 3,
+    CharacterDead = 4,
+    CharacterReborn = 5,
+    SkillCooldownTriggered = 6,
 };
 
 enum class GroupId : uint8_t
@@ -104,6 +115,7 @@ struct InputCommand
     ActionType action = ActionType::Move;
     int16_t axisX = 0;
     int16_t axisY = 0;
+    bool isDiscreteAction = false;
 };
 
 struct CharacterSnapshot
@@ -142,14 +154,30 @@ struct UnitSnapshot
     bool flipped = false;
 };
 
+struct CombatEvent
+{
+    uint32_t eventId = 0;
+    uint32_t tick = 0;
+    CombatEventType eventType = CombatEventType::None;
+    uint8_t sourceSlot = 0;
+    uint8_t targetSlot = 0;
+    int32_t value = 0;
+    int16_t posX = 0;
+    int16_t posY = 0;
+};
+
 struct StateSnapshot
 {
     uint32_t matchId = 0;
     uint32_t tick = 0;
     // Match clock in seconds as tracked by the snapshot sender (host).
     uint16_t elapsedSeconds = 0;
+    uint32_t sessionEpoch = 0;
+    uint32_t clientSequenceWatermark = 0;
+    uint32_t stateChecksum = 0;
     std::vector<CharacterSnapshot> characters;
     std::vector<UnitSnapshot> units;
+    std::vector<CombatEvent> combatEvents;
 };
 
 struct RoomAdvertisement
@@ -165,6 +193,9 @@ struct RoomAdvertisement
     uint32_t mode = 0;
     uint32_t mapId = 1;
 };
+
+// Computes a deterministic FNV-1a checksum over crucial simulation state.
+uint32_t computeStateChecksum(const StateSnapshot &snapshot);
 
 // Encodes a complete length-delimited frame suitable for TCP or a reliable packet.
 bool encodeMessage(const Message &message, std::vector<uint8_t> &out, std::string *error = nullptr);

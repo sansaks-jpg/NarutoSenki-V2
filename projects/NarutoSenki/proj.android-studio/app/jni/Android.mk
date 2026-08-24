@@ -31,6 +31,8 @@ LOCAL_SRC_FILES := narutosenki/main.cpp \
 		../../../Classes/Network/LanDiscovery.cpp \
 		../../../Classes/Network/LanSession.cpp \
 		../../../Classes/Network/LanNetworkRuntime.cpp \
+		../../../Classes/Network/AuthoritativeBattleState.cpp \
+		../../../Classes/Network/NetworkPresentationAdapter.cpp \
 		../../../Classes/Network/NetworkLobbyLayer.cpp \
 		../../../Classes/MyUtils/CCScrewLayer.cpp \
 		../../../Classes/MyUtils/CCShake.cpp \

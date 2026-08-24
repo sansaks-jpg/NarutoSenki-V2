@@ -396,11 +396,10 @@ bool LanSession::submitInput(const InputCommand &command, std::string *error)
         if (encodeInputCommand(normalized, message.payload, error))
         {
             sendToRemote(message, error);
-            // Discrete actions (attacks/skills/items) must not be lost to UDP:
-            // a silently dropped attack desyncs both simulations. Movement is
-            // intentionally fire-and-forget; positions are synced via
-            // Snapshot/ClientState instead.
-            if (normalized.action != ActionType::Move)
+            // Discrete actions (attacks/skills/items/stop release) must not be lost to UDP:
+            // a silently dropped discrete action desyncs both simulations. Continuous movement
+            // without discrete flag remains light fire-and-forget.
+            if (normalized.action != ActionType::Move || normalized.isDiscreteAction)
             {
                 PendingReliable pending;
                 pending.message = std::move(message);
@@ -846,6 +845,24 @@ void LanSession::drainNotices(std::vector<SessionNotice> &notices)
         notices.push_back(std::move(_notices.front()));
         _notices.pop_front();
     }
+}
+
+void LanSession::getDiagnostics(SessionDiagnostics &out) const
+{
+    out.matchId = _config.matchId;
+    out.role = _role;
+    out.state = _state;
+    out.remoteAddress = _remoteAddress;
+    out.remotePort = _remotePort;
+    out.remoteConnected = _remoteConnected;
+    out.lastRemoteInputSequence = _lastRemoteInputSequence;
+    out.lastAckedByRemote = _lastAckedByRemote;
+    out.remoteSequenceWatermark = _remoteSequenceWatermark;
+    out.pendingReliableCount = _pendingReliable.size();
+    out.inputQueueDepth = _inputCommands.size();
+    out.snapshotQueueDepth = _snapshots.size();
+    out.lastReceiveMs = _lastReceiveMs;
+    out.lastHeartbeatMs = _lastHeartbeatMs;
 }
 
 void LanSession::clearBattleQueues()

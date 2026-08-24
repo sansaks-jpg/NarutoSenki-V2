@@ -24,6 +24,8 @@ SOURCES = main.cpp \
 	../Classes/Network/LanDiscovery.cpp \
 	../Classes/Network/LanSession.cpp \
 	../Classes/Network/LanNetworkRuntime.cpp \
+	../Classes/Network/AuthoritativeBattleState.cpp \
+	../Classes/Network/NetworkPresentationAdapter.cpp \
 	../Classes/Network/NetworkLobbyLayer.cpp \
 	../Classes/UI/GameModeLayer.cpp \
 	../Classes/MyUtils/CCScrewLayer.cpp \

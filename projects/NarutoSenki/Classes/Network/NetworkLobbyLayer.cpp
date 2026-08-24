@@ -190,30 +190,22 @@ void NetworkLobbyLayer::renderHeader()
         addChild(menu_bar_t, 2);
     }
 
-    // Title banner
-    auto startmenu_title = Sprite::createWithSpriteFrameName("startmenu_title.png");
-    if (startmenu_title)
-    {
-        startmenu_title->setAnchorPoint(Vec2(0, 0));
-        startmenu_title->setPosition(Vec2(2, winSize.height - startmenu_title->getContentSize().height - 2));
-        addChild(startmenu_title, 3);
-    }
-
+    // Title banner text
     auto titleText = makeBMFont("LAN MULTIPLAYER", Fonts::Default, 0.65f);
-    titleText->setPosition(Vec2(winSize.width / 2, winSize.height - 18));
+    titleText->setPosition(Vec2(winSize.width / 2, winSize.height - 16));
     addChild(titleText, 4);
 
-    // Status label at bottom
+    // Status label at bottom (safe area padded)
     _statusLabel = CCLabelTTF::create(_message.c_str(), "", 11);
     _statusLabel->setAnchorPoint(Vec2(0, 0));
-    _statusLabel->setPosition(Vec2(12, 4));
+    _statusLabel->setPosition(Vec2(16, 7));
     addChild(_statusLabel, 5);
 
-    // Return button
+    // Return button at bottom-right
     auto returnImg = MenuItemSprite::create(Sprite::create("UI/return_btn.png"), nullptr, nullptr, this, menu_selector(NetworkLobbyLayer::onBack));
     auto returnMenu = Menu::create(returnImg, nullptr);
     returnMenu->setAnchorPoint(Vec2(1, 0.5f));
-    returnMenu->setPosition(Vec2(winSize.width - 35, 45));
+    returnMenu->setPosition(Vec2(winSize.width - 38, 38));
     addChild(returnMenu, 6);
 }
 
@@ -300,7 +292,7 @@ void NetworkLobbyLayer::renderJoinPage()
     _ipEditBox = CCEditBox::create(CCSize(170, 26), inputBg);
     _ipEditBox->setPosition(Vec2(winSize.width / 2 - 45, winSize.height / 2 + 40));
     _ipEditBox->setText(_savedIpText.c_str());
-    _ipEditBox->setPlaceHolder("Host IP:28765 (Optional fallback)");
+    _ipEditBox->setPlaceHolder("192.168.43.1 / Host IP:28765");
     _ipEditBox->setInputMode(kEditBoxInputModeSingleLine);
     _ipEditBox->setReturnType(kKeyboardReturnTypeGo);
     _ipEditBox->setFont("", 12);
@@ -496,15 +488,13 @@ void NetworkLobbyLayer::renderHostPage()
     if (_session->state() == nsv2::network::SessionState::Lobby)
     {
         // Change Hero button placed below local player portrait (Left Side)
-        auto changeBtn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("change_btn.png"),
-                                                Sprite::createWithSpriteFrameName("change_btn2.png"),
-                                                this, menu_selector(NetworkLobbyLayer::onOpenHeroSelect));
-        changeBtn->setPosition(Vec2(winSize.width * 0.25f, 48));
+        auto changeBtn = makeButton("CHANGE HERO", CCSize(100, 26), this, menu_selector(NetworkLobbyLayer::onOpenHeroSelect), 0.48f);
+        changeBtn->setPosition(Vec2(winSize.width * 0.25f, 44));
         controlMenu->addChild(changeBtn);
 
         // Ready Button in center
         auto readyBtn = makeButton(_session->localReady() ? "CANCEL" : "READY", CCSize(95, 30), this, menu_selector(NetworkLobbyLayer::onReady), 0.55f);
-        readyBtn->setPosition(Vec2(winSize.width / 2, 50));
+        readyBtn->setPosition(Vec2(winSize.width / 2, 44));
         controlMenu->addChild(readyBtn);
 
         // Start Match Button (Host only, when both players are ready)
@@ -515,7 +505,7 @@ void NetworkLobbyLayer::renderHostPage()
             auto startBtn = MenuItemSprite::create(Sprite::createWithSpriteFrameName("start_btn.png"),
                                                    Sprite::createWithSpriteFrameName("start_btn.png"),
                                                    this, menu_selector(NetworkLobbyLayer::onStart));
-            startBtn->setPosition(Vec2(winSize.width / 2, 92));
+            startBtn->setPosition(Vec2(winSize.width / 2, 88));
             controlMenu->addChild(startBtn);
         }
     }
@@ -526,16 +516,17 @@ void NetworkLobbyLayer::renderHeroSelectPage()
     setMessage("Tap character to preview. Double-click or tap OK to select hero.");
 
     // Grid of 35 character avatar buttons on the left
-    // 7 columns x 5 rows
+    // Responsive spacing for narrow (4:3) vs wide screens
+    bool isNarrow = winSize.width < 500.0f;
+    const int cols = 7;
+    const float startX = isNarrow ? 16.0f : 24.0f;
+    const float stepX = isNarrow ? 30.0f : 35.0f;
+    const float startY = winSize.height - 68.0f;
+    const float stepY = 38.0f;
+
     auto avatarMenu = Menu::create();
     avatarMenu->setPosition(Vec2(0, 0));
     addChild(avatarMenu, 5);
-
-    const int cols = 7;
-    const float startX = 24.0f;
-    const float stepX = 35.0f;
-    const float startY = winSize.height - 68.0f;
-    const float stepY = 38.0f;
 
     for (int i = 0; i < kAllSelectHeroCount; ++i)
     {
@@ -559,27 +550,33 @@ void NetworkLobbyLayer::renderHeroSelectPage()
             item->setPosition(Vec2(posX, posY));
             avatarMenu->addChild(item);
 
-            // Highlight frame for currently previewed hero
+            // Highlight indicator badge for currently previewed hero (prevents solid white block)
             if (_previewHeroName == kAllSelectHeroes[i])
             {
-                auto blinkFrame = Sprite::createWithSpriteFrameName("Blink_select.png");
-                if (blinkFrame)
+                auto indicator = Sprite::createWithSpriteFrameName("1p.png");
+                if (indicator)
                 {
-                    blinkFrame->setPosition(Vec2(posX, posY));
-                    addChild(blinkFrame, 6);
+                    indicator->setScale(0.55f);
+                    indicator->setPosition(Vec2(posX - 8, posY + 16));
+                    auto blink = CCBlink::create(0.8f, 1);
+                    indicator->runAction(RepeatForever::create(blink));
+                    addChild(indicator, 7);
                 }
             }
         }
     }
 
     // Right Side: Selected Character Preview (Half Portrait, Kanji Font, Name, OK Button)
-    const float previewCenterX = winSize.width - 95.0f;
+    const float gridRightEdge = startX + (cols - 1) * stepX + 18.0f;
+    const float previewCenterX = isNarrow ? (gridRightEdge + (winSize.width - 70.0f - gridRightEdge) * 0.5f) : (winSize.width >= 560.0f ? (gridRightEdge + winSize.width) * 0.5f : winSize.width - 110.0f);
 
     // Kanji Font Logo
     std::string fontSpriteName = _previewHeroName + "_font.png";
     auto fontLogo = Sprite::createWithSpriteFrameName(fontSpriteName.c_str());
     if (fontLogo)
     {
+        if (isNarrow)
+            fontLogo->setScale(0.85f);
         fontLogo->setPosition(Vec2(previewCenterX, winSize.height - 68));
         addChild(fontLogo, 4);
     }
@@ -591,6 +588,8 @@ void NetworkLobbyLayer::renderHeroSelectPage()
         halfPortrait = Sprite::createWithSpriteFrameName("Naruto_half.png");
     if (halfPortrait)
     {
+        if (isNarrow)
+            halfPortrait->setScale(0.75f);
         halfPortrait->setPosition(Vec2(previewCenterX, winSize.height / 2));
         addChild(halfPortrait, 3);
     }
@@ -602,7 +601,7 @@ void NetworkLobbyLayer::renderHeroSelectPage()
 
     // Confirm OK Button
     auto okBtn = makeButton("OK", CCSize(75, 28), this, menu_selector(NetworkLobbyLayer::onConfirmHeroSelect), 0.55f);
-    okBtn->setPosition(Vec2(previewCenterX, 42));
+    okBtn->setPosition(Vec2(previewCenterX, 38));
 
     auto confirmMenu = Menu::create(okBtn, nullptr);
     confirmMenu->setPosition(Vec2(0, 0));
@@ -772,7 +771,7 @@ std::string NetworkLobbyLayer::selectedAddress() const
     const size_t separator = value.find(':');
     if (separator != std::string::npos)
         value.resize(separator);
-    return value.empty() ? "127.0.0.1" : value;
+    return value.empty() ? "192.168.43.1" : value;
 }
 
 uint16_t NetworkLobbyLayer::selectedPort() const

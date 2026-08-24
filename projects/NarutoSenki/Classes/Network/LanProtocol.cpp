@@ -140,6 +140,12 @@ bool validAction(uint8_t raw)
            raw <= static_cast<uint8_t>(ActionType::Item1);
 }
 
+bool validCombatEvent(uint8_t raw)
+{
+    return raw >= static_cast<uint8_t>(CombatEventType::AttackConfirmed) &&
+           raw <= static_cast<uint8_t>(CombatEventType::SkillCooldownTriggered);
+}
+
 bool decodeReaderResult(Reader &reader, std::string *error)
 {
     if (reader.remaining() != 0)
@@ -326,6 +332,7 @@ bool encodeInputCommand(const InputCommand &command, std::vector<uint8_t> &out, 
     putU8(out, static_cast<uint8_t>(command.action));
     putI16(out, command.axisX);
     putI16(out, command.axisY);
+    putU8(out, command.isDiscreteAction ? 1 : 0);
     return true;
 }
 
@@ -333,8 +340,10 @@ bool decodeInputCommand(const std::vector<uint8_t> &data, InputCommand &out, std
 {
     Reader reader(data.data(), data.size());
     uint8_t rawAction = 0;
+    uint8_t isDiscrete = 0;
     if (!reader.u32(out.matchId) || !reader.u32(out.tick) || !reader.u32(out.sequence) ||
-        !reader.u8(out.playerSlot) || !reader.u8(rawAction) || !reader.i16(out.axisX) || !reader.i16(out.axisY))
+        !reader.u8(out.playerSlot) || !reader.u8(rawAction) || !reader.i16(out.axisX) || !reader.i16(out.axisY) ||
+        !reader.u8(isDiscrete) || isDiscrete > 1)
     {
         fail(error, "incomplete input command");
         return false;
@@ -345,6 +354,7 @@ bool decodeInputCommand(const std::vector<uint8_t> &data, InputCommand &out, std
         return false;
     }
     out.action = static_cast<ActionType>(rawAction);
+    out.isDiscreteAction = isDiscrete != 0;
     return decodeReaderResult(reader, error);
 }
 
@@ -367,9 +377,43 @@ bool encodeRoomAdvertisement(const RoomAdvertisement &room, std::vector<uint8_t>
     return out.size() <= kMaxPayloadBytes || (fail(error, "room advertisement exceeds protocol limit"), false);
 }
 
+uint32_t computeStateChecksum(const StateSnapshot &snapshot)
+{
+    // Deterministic 32-bit FNV-1a hash over simulation snapshot essentials.
+    uint32_t hash = 2166136261u;
+    auto hashU32 = [&hash](uint32_t v) {
+        for (int i = 0; i < 4; ++i)
+        {
+            hash ^= static_cast<uint8_t>((v >> (i * 8)) & 0xFF);
+            hash *= 16777619u;
+        }
+    };
+    hashU32(snapshot.tick);
+    hashU32(snapshot.elapsedSeconds);
+    for (const auto &c : snapshot.characters)
+    {
+        hashU32(c.slot);
+        hashU32(static_cast<uint32_t>(c.x));
+        hashU32(static_cast<uint32_t>(c.y));
+        hashU32(c.hp);
+        hashU32(c.ckr);
+        hashU32(c.state);
+    }
+    for (const auto &u : snapshot.units)
+    {
+        hashU32(u.unitId);
+        hashU32(static_cast<uint32_t>(u.kind));
+        hashU32(static_cast<uint32_t>(u.x));
+        hashU32(static_cast<uint32_t>(u.y));
+        hashU32(u.hp);
+        hashU32(u.state);
+    }
+    return hash;
+}
+
 bool encodeStateSnapshot(const StateSnapshot &snapshot, std::vector<uint8_t> &out, std::string *error)
 {
-    if (snapshot.characters.size() > kMaxSlots || snapshot.units.size() > 255)
+    if (snapshot.characters.size() > kMaxSlots || snapshot.units.size() > 255 || snapshot.combatEvents.size() > 255)
     {
         fail(error, "snapshot entity count exceeds protocol limit");
         return false;
@@ -378,6 +422,9 @@ bool encodeStateSnapshot(const StateSnapshot &snapshot, std::vector<uint8_t> &ou
     putU32(out, snapshot.matchId);
     putU32(out, snapshot.tick);
     putU16(out, snapshot.elapsedSeconds);
+    putU32(out, snapshot.sessionEpoch);
+    putU32(out, snapshot.clientSequenceWatermark);
+    putU32(out, snapshot.stateChecksum);
     putU8(out, static_cast<uint8_t>(snapshot.characters.size()));
     for (const auto &character : snapshot.characters)
     {
@@ -401,6 +448,18 @@ bool encodeStateSnapshot(const StateSnapshot &snapshot, std::vector<uint8_t> &ou
         putU8(out, unit.state);
         putU8(out, unit.flipped ? 1 : 0);
     }
+    putU8(out, static_cast<uint8_t>(snapshot.combatEvents.size()));
+    for (const auto &ev : snapshot.combatEvents)
+    {
+        putU32(out, ev.eventId);
+        putU32(out, ev.tick);
+        putU8(out, static_cast<uint8_t>(ev.eventType));
+        putU8(out, ev.sourceSlot);
+        putU8(out, ev.targetSlot);
+        putI32(out, ev.value);
+        putI16(out, ev.posX);
+        putI16(out, ev.posY);
+    }
     return out.size() <= kMaxPayloadBytes || (fail(error, "snapshot exceeds protocol limit"), false);
 }
 
@@ -409,7 +468,9 @@ bool decodeStateSnapshot(const std::vector<uint8_t> &data, StateSnapshot &out, s
     Reader reader(data.data(), data.size());
     uint8_t count = 0;
     uint8_t unitCount = 0;
+    uint8_t eventCount = 0;
     if (!reader.u32(out.matchId) || !reader.u32(out.tick) || !reader.u16(out.elapsedSeconds) ||
+        !reader.u32(out.sessionEpoch) || !reader.u32(out.clientSequenceWatermark) || !reader.u32(out.stateChecksum) ||
         !reader.u8(count) || count > kMaxSlots)
     {
         fail(error, "invalid snapshot header");
@@ -455,6 +516,32 @@ bool decodeStateSnapshot(const std::vector<uint8_t> &data, StateSnapshot &out, s
         unit.kind = static_cast<NetUnitKind>(rawKind);
         unit.flipped = flipped != 0;
         out.units.push_back(unit);
+    }
+    if (!reader.u8(eventCount))
+    {
+        fail(error, "incomplete snapshot combat event header");
+        return false;
+    }
+    out.combatEvents.clear();
+    out.combatEvents.reserve(eventCount);
+    for (uint8_t i = 0; i < eventCount; ++i)
+    {
+        CombatEvent ev;
+        uint8_t rawEvType = 0;
+        if (!reader.u32(ev.eventId) || !reader.u32(ev.tick) || !reader.u8(rawEvType) ||
+            !reader.u8(ev.sourceSlot) || !reader.u8(ev.targetSlot) || !reader.i32(ev.value) ||
+            !reader.i16(ev.posX) || !reader.i16(ev.posY))
+        {
+            fail(error, "incomplete snapshot combat event");
+            return false;
+        }
+        if (rawEvType != 0 && !validCombatEvent(rawEvType))
+        {
+            fail(error, "unknown combat event type");
+            return false;
+        }
+        ev.eventType = static_cast<CombatEventType>(rawEvType);
+        out.combatEvents.push_back(ev);
     }
     return decodeReaderResult(reader, error);
 }

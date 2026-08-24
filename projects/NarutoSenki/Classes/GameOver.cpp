@@ -124,27 +124,28 @@ void GameOver::listResult()
 
 	uint32_t _totalSecond = gameLayer->_minute * 60 + gameLayer->_second;
 	float resultScore = 0;
-	uint32_t killDead = currPlayer->getKillNum() - currPlayer->_deadNum;
+	int32_t killDead = static_cast<int32_t>(currPlayer->getKillNum()) - static_cast<int32_t>(currPlayer->_deadNum);
 
 	// The display counter can lag the monotonic counter by one scheduler tick.
 	if (_totalSecond != gameLayer->getTotalTime())
 		_totalSecond = gameLayer->getTotalTime();
 
+	float totalMinutes = std::max(1.0f / 60.0f, _totalSecond / 60.0f);
+
 	if (gameLayer->_isHardCoreGame)
 	{
 		if (_totalSecond > 900)
-			resultScore = ((killDead / (_totalSecond / 60.0f)) / 3) * 100;
+			resultScore = ((killDead / totalMinutes) / 3.0f) * 100.0f;
 		else
-			resultScore = ((killDead - ((_totalSecond / 60.0f - 15) * 3)) / 45) * 100;
+			resultScore = ((killDead - ((totalMinutes - 15.0f) * 3.0f)) / 45.0f) * 100.0f;
 	}
 	else
 	{
 		if (_totalSecond > 600)
-			resultScore = ((killDead / (_totalSecond / 60.0f)) / 4) * 100;
+			resultScore = ((killDead / totalMinutes) / 4.0f) * 100.0f;
 		else
-			resultScore = ((killDead - ((_totalSecond / 60.0f - 10) * 4)) / 40) * 100;
+			resultScore = ((killDead - ((totalMinutes - 10.0f) * 4.0f)) / 40.0f) * 100.0f;
 	}
-
 
 	int i = 0;
 	uint32_t konohaKill = 0;
@@ -152,6 +153,9 @@ void GameOver::listResult()
 
 	for (auto hero : getGameLayer()->_CharacterArray)
 	{
+		if (!hero)
+			continue;
+
 		if (hero->isClone() ||
 			hero->isSummon() ||
 			hero->isKugutsu() ||
@@ -406,6 +410,9 @@ void GameOver::listResult()
 
 					for (auto hero : getGameLayer()->_CharacterArray)
 					{
+						if (!hero)
+							continue;
+
 						if (hero->isClone() ||
 							hero->isPlayer() ||
 							hero->isSummon() ||

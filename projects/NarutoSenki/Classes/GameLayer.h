@@ -39,6 +39,16 @@ class BattleRuntimeSystem;
 class SpawnSystem;
 struct SessionState;
 
+namespace nsv2::network
+{
+struct InputCommand;
+struct StateSnapshot;
+struct UnitSnapshot;
+struct CharacterSnapshot;
+class AuthoritativeBattleState;
+class NetworkPresentationAdapter;
+} // namespace nsv2::network
+
 extern GameLayer *_gLayer;
 extern bool _isFullScreen;
 #if (CC_TARGET_PLATFORM == CC_PLATFORM_LINUX || CC_TARGET_PLATFORM == CC_PLATFORM_WIN32)
@@ -258,6 +268,8 @@ private:
 	std::unique_ptr<BattleRuntimeSystem> _battleRuntimeSystem;
 	std::unique_ptr<SpawnSystem> _spawnSystem;
 	std::unique_ptr<SessionState> _sessionState;
+	std::unique_ptr<nsv2::network::AuthoritativeBattleState> _authBattleState;
+	std::unique_ptr<nsv2::network::NetworkPresentationAdapter> _netPresentation;
 };
 
 #define BIND(funcName) std::bind(&funcName, this)

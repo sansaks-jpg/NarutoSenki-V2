@@ -687,19 +687,19 @@ protected:
 	}
 	Vec2 getDirByMoveTo(CharacterBase *target) {
 		if (!target)
-			return Vec2::ZERO;
+			return Vec2(0, 0);
 		return (target->getPosition() - getPosition()).getNormalized();
 	}
 	Vec2 getDistanceToTarget() {
 		if (!_mainTarget)
-			return Vec2::ZERO;
+			return Vec2(0, 0);
 		return _mainTarget->_originY
 			? Vec2(_mainTarget->getPositionX(), _mainTarget->_originY) - getPosition()
 			: _mainTarget->getPosition() - getPosition();
 	}
 	Vec2 getDistanceToTargetAndIgnoreOriginY() {
 		if (!_mainTarget)
-			return Vec2::ZERO;
+			return Vec2(0, 0);
 		return _mainTarget->getPosition() - getPosition();
 	}
 

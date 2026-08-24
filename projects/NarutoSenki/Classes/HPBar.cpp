@@ -15,9 +15,9 @@ bool HPBar::init(const char *szImage)
 	if (!hpBar)
 	{
 		if (is_same(fileName, "hp"))
-			SpriteFrameCache::getInstance()->addSpriteFramesWithFile("UI/hpBar/hpBar.plist");
+			addSprites("UI/hpBar/hpBar.plist");
 		else
-			SpriteFrameCache::getInstance()->addSpriteFramesWithFile("UI/hpBar/flogBar.plist");
+			addSprites("UI/hpBar/flogBar.plist");
 		hpBar = Sprite::createWithSpriteFrameName(szImage);
 	}
 
@@ -44,12 +44,12 @@ bool HPBar::init(const char *szImage)
 	{
 		if (is_same(fileName, "hp"))
 		{
-			SpriteFrameCache::getInstance()->addSpriteFramesWithFile("UI/hpBar/hpBar.plist");
+			addSprites("UI/hpBar/hpBar.plist");
 			hpBottom = Sprite::createWithSpriteFrameName("hp_bottom.png");
 		}
 		else
 		{
-			SpriteFrameCache::getInstance()->addSpriteFramesWithFile("UI/hpBar/flogBar.plist");
+			addSprites("UI/hpBar/flogBar.plist");
 			hpBottom = Sprite::createWithSpriteFrameName("flog_bar_buttom.png");
 		}
 	}

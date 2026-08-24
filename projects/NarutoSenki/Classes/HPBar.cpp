@@ -4,34 +4,72 @@
 bool HPBar::init(const char *szImage)
 {
 	RETURN_FALSE_IF(!Sprite::init());
+	if (!szImage)
+		return false;
 
 	char fileName[3] = "xx";
 	strncpy(fileName, szImage, 2);
+	fileName[2] = '\0';
 
 	hpBar = Sprite::createWithSpriteFrameName(szImage);
-	hpBar->setAnchorPoint(Vec2(0, 0));
-	addChild(hpBar, 1);
+	if (!hpBar)
+	{
+		if (is_same(fileName, "hp"))
+			SpriteFrameCache::getInstance()->addSpriteFramesWithFile("UI/hpBar/hpBar.plist");
+		else
+			SpriteFrameCache::getInstance()->addSpriteFramesWithFile("UI/hpBar/flogBar.plist");
+		hpBar = Sprite::createWithSpriteFrameName(szImage);
+	}
+
+	if (hpBar)
+	{
+		hpBar->setAnchorPoint(Vec2(0, 0));
+		addChild(hpBar, 1);
+	}
 
 	if (is_same(fileName, "hp"))
 	{
 		hpBottom = Sprite::createWithSpriteFrameName("hp_bottom.png");
-		hpBar->setPosition(Vec2(15, 1));
+		if (hpBar)
+			hpBar->setPosition(Vec2(15, 1));
 	}
 	else
 	{
 		hpBottom = Sprite::createWithSpriteFrameName("flog_bar_buttom.png");
-		hpBar->setPosition(Vec2(1, 1));
+		if (hpBar)
+			hpBar->setPosition(Vec2(1, 1));
 	}
-	hpBottom->setAnchorPoint(Vec2(0, 0));
-	addChild(hpBottom, -1);
+
+	if (!hpBottom)
+	{
+		if (is_same(fileName, "hp"))
+		{
+			SpriteFrameCache::getInstance()->addSpriteFramesWithFile("UI/hpBar/hpBar.plist");
+			hpBottom = Sprite::createWithSpriteFrameName("hp_bottom.png");
+		}
+		else
+		{
+			SpriteFrameCache::getInstance()->addSpriteFramesWithFile("UI/hpBar/flogBar.plist");
+			hpBottom = Sprite::createWithSpriteFrameName("flog_bar_buttom.png");
+		}
+	}
+
+	if (hpBottom)
+	{
+		hpBottom->setAnchorPoint(Vec2(0, 0));
+		addChild(hpBottom, -1);
+	}
 
 	return true;
 }
 
 void HPBar::changeBar(const char *szImage)
 {
+	if (!hpBar || !szImage)
+		return;
 	auto frame = getSpriteFrame(szImage);
-	hpBar->setDisplayFrame(frame);
+	if (frame)
+		hpBar->setDisplayFrame(frame);
 }
 
 void HPBar::loseHP(float percent)
@@ -74,8 +112,11 @@ void HPBar::loseHP(float percent)
 		{
 			// Mirror only: empty the bar. The authoritative death arrives via
 			// the host snapshot (GameLayer applies state + counters).
-			auto s = ScaleTo::create(0.05f, 0.0f, 1);
-			hpBar->runAction(s);
+			if (hpBar)
+			{
+				auto s = ScaleTo::create(0.05f, 0.0f, 1);
+				hpBar->runAction(s);
+			}
 			return;
 		}
 
@@ -534,10 +575,13 @@ void HPBar::loseHP(float percent)
 	}
 	else
 	{
-		auto s = ScaleTo::create(0.2f, percent, 1);
-		hpBar->runAction(s);
+		if (hpBar)
+		{
+			auto s = ScaleTo::create(0.2f, percent, 1);
+			hpBar->runAction(s);
+		}
 
-		if (_delegate->isPlayer())
+		if (_delegate && _delegate->isPlayer())
 			getGameLayer()->setHPLose(percent);
 	}
 }

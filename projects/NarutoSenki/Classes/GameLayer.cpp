@@ -384,6 +384,7 @@ void GameLayer::initHeros()
 	// Tower HP bar color depends on currentPlayer group, so towers must be
 	// initialized after at least one hero/player is created.
 	initTower();
+	initFlogs();
 
 	schedule(schedule_selector(GameLayer::updateViewPoint), 0.00f);
 	if (_networkBattle)

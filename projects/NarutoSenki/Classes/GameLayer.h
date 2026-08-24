@@ -194,6 +194,7 @@ public:
 	bool _isGear;
 	bool _isPause;
 	GearLayer *_gearLayer;
+	PauseLayer *_pauseLayer;
 
 	void clearAllFlogsMainTarget(CharacterBase *target);
 	void clearAllUnitsMainTarget(CharacterBase *target);

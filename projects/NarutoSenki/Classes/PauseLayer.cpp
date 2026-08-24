@@ -6,15 +6,24 @@ bool PauseLayer::init(RenderTexture *snapshoot)
 	if (!Layer::init())
 		return false;
 
-	SimpleAudioEngine::sharedEngine()->stopAllEffects();
-	SimpleAudioEngine::sharedEngine()->pauseAllEffects();
-	SimpleAudioEngine::sharedEngine()->pauseBackgroundMusic();
+	auto *gameLayer = getGameLayer();
+	const bool isNet = gameLayer && gameLayer->isNetworkBattle();
 
-	Texture2D *bgTexture = snapshoot->getSprite()->getTexture();
-	Sprite *bg = Sprite::createWithTexture(bgTexture);
-	bg->setAnchorPoint(Vec2(0, 0));
-	bg->setFlipY(true);
-	addChild(bg, 0);
+	if (!isNet)
+	{
+		SimpleAudioEngine::sharedEngine()->stopAllEffects();
+		SimpleAudioEngine::sharedEngine()->pauseAllEffects();
+		SimpleAudioEngine::sharedEngine()->pauseBackgroundMusic();
+	}
+
+	if (snapshoot && snapshoot->getSprite())
+	{
+		Texture2D *bgTexture = snapshoot->getSprite()->getTexture();
+		Sprite *bg = Sprite::createWithTexture(bgTexture);
+		bg->setAnchorPoint(Vec2(0, 0));
+		bg->setFlipY(true);
+		addChild(bg, 0);
+	}
 
 	Layer *blend = LayerColor::create(ccc4(0, 0, 0, 150), winSize.width, winSize.height);
 	addChild(blend, 1);
@@ -122,6 +131,9 @@ void PauseLayer::onPreload(Ref *sender)
 
 void PauseLayer::onResume(Ref *sender)
 {
+	auto *gameLayer = getGameLayer();
+	const bool isNet = gameLayer && gameLayer->isNetworkBattle();
+
 	if (UserDefault::sharedUserDefault()->getBoolForKey("isBGM"))
 	{
 		SimpleAudioEngine::sharedEngine()->resumeBackgroundMusic();
@@ -131,8 +143,17 @@ void PauseLayer::onResume(Ref *sender)
 		SimpleAudioEngine::sharedEngine()->resumeAllEffects();
 	}
 
-	Director::sharedDirector()->popScene();
-	getGameLayer()->_isPause = false;
+	if (isNet)
+	{
+		removeFromParent();
+	}
+	else
+	{
+		Director::sharedDirector()->popScene();
+	}
+
+	if (gameLayer)
+		gameLayer->_isPause = false;
 }
 
 void PauseLayer::onBackToMenu(Ref *sender)
@@ -168,10 +189,25 @@ void PauseLayer::onBackToMenu(Ref *sender)
 void PauseLayer::onLeft(Ref *sender)
 {
 	SimpleAudioEngine::sharedEngine()->playEffect("Audio/Menu/confirm.ogg");
-	getGameLayer()->_isSurrender = true;
-	Director::sharedDirector()->popScene();
+	auto *gameLayer = getGameLayer();
+	const bool isNet = gameLayer && gameLayer->isNetworkBattle();
 
-	getGameLayer()->_isPause = false;
+	if (gameLayer)
+		gameLayer->_isSurrender = true;
+
+	if (isNet)
+	{
+		removeFromParent();
+		if (gameLayer)
+			gameLayer->onGameOver(false);
+	}
+	else
+	{
+		Director::sharedDirector()->popScene();
+	}
+
+	if (gameLayer)
+		gameLayer->_isPause = false;
 }
 
 void PauseLayer::onCancel(Ref *sender)

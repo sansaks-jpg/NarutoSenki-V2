@@ -79,33 +79,18 @@ void NetworkPresentationAdapter::reconcileLocalPosition(const CharacterSnapshot 
     float authX = authSnap.x / 100.0f;
     float authY = authSnap.y / 100.0f;
 
-    // Replay unacknowledged predicted inputs on top of authoritative base
-    float replayedX = authX;
-    float replayedY = authY;
-    for (const auto &inp : _unackedInputs)
-    {
-        replayedX += inp.deltaX;
-        replayedY += inp.deltaY;
-    }
-
     Vec2 currentPos = localHero->getPosition();
-    float dx = currentPos.x - replayedX;
-    float dy = currentPos.y - replayedY;
+    float dx = currentPos.x - authX;
+    float dy = currentPos.y - authY;
     float dist = std::sqrt(dx * dx + dy * dy);
 
-    if (dist > kSnapThreshold)
+    // In 1v1 LAN, movement is locally simulated and reported via sendLocalClientState.
+    // Only snap on catastrophic desync / teleport / respawn (> 250 points) to avoid rubberbanding.
+    if (dist > 250.0f)
     {
-        // Major discrepancy (e.g. knockback/stun/teleport) -> snap immediately
-        localHero->setPosition(Vec2(replayedX, replayedY));
+        localHero->setPosition(Vec2(authX, authY));
         _errorOffsetX = 0.0f;
         _errorOffsetY = 0.0f;
-    }
-    else
-    {
-        // Smooth error decay offset
-        _errorOffsetX = dx;
-        _errorOffsetY = dy;
-        localHero->setPosition(Vec2(replayedX, replayedY));
     }
 }
 

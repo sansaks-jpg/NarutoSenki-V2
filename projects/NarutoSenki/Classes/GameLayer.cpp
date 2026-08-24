@@ -168,6 +168,8 @@ GameLayer::GameLayer()
 
 	_isGear = false;
 	_isPause = false;
+	_gearLayer = nullptr;
+	_pauseLayer = nullptr;
 
 #if (CC_TARGET_PLATFORM == CC_PLATFORM_WIN32)
 	_lastPressedMovementKey = -100;
@@ -1223,6 +1225,10 @@ void GameLayer::applyNetworkUnits(const std::vector<nsv2::network::UnitSnapshot>
 					continue;
 				if (tower->getHP() != unit.hp)
 					tower->setHPValue(unit.hp, true);
+				if (unit.hp == 0 || unit.state == static_cast<uint8_t>(State::DEAD))
+				{
+					tower->dead();
+				}
 				break;
 			}
 			continue;
@@ -1316,6 +1322,16 @@ void GameLayer::applyNetworkUnits(const std::vector<nsv2::network::UnitSnapshot>
 			_netGuardianMirror->dead();
 		_netGuardianMirror = nullptr;
 		_netGuardianUnitId = -1;
+	}
+	for (auto it = _TowerArray.begin(); it != _TowerArray.end();)
+	{
+		auto *tower = *it;
+		if (tower && tower->getState() != State::DEAD &&
+			!aliveIds.count(kNetTowerIdBase + tower->getCharId()))
+		{
+			tower->dead();
+		}
+		++it;
 	}
 }
 
@@ -1428,6 +1444,17 @@ void GameLayer::onPause()
 		return;
 
 	_isPause = true;
+	if (_networkBattle)
+	{
+		PauseLayer *layer = PauseLayer::create(nullptr);
+		_pauseLayer = layer;
+		if (getHudLayer())
+			getHudLayer()->addChild(layer, 9999);
+		else
+			addChild(layer, 9999);
+		return;
+	}
+
 	RenderTexture *snapshoot = RenderTexture::create(winSize.width, winSize.height);
 	Scene *f = Director::sharedDirector()->getRunningScene();
 	Ref *pObject = f->getChildren()->objectAtIndex(0);
@@ -1440,6 +1467,7 @@ void GameLayer::onPause()
 
 	Scene *pscene = Scene::create();
 	PauseLayer *layer = PauseLayer::create(snapshoot);
+	_pauseLayer = layer;
 	pscene->addChild(layer);
 	Director::sharedDirector()->pushScene(pscene);
 }
@@ -1458,7 +1486,18 @@ void GameLayer::resumeFromPause()
 		SimpleAudioEngine::sharedEngine()->resumeAllEffects();
 	}
 
-	Director::sharedDirector()->popScene();
+	if (_networkBattle)
+	{
+		if (_pauseLayer)
+		{
+			_pauseLayer->removeFromParent();
+			_pauseLayer = nullptr;
+		}
+	}
+	else
+	{
+		Director::sharedDirector()->popScene();
+	}
 	_isPause = false;
 }
 
@@ -1469,6 +1508,18 @@ void GameLayer::onGear()
 	if (_isGear)
 		return;
 	_isGear = true;
+
+	if (_networkBattle)
+	{
+		GearLayer *layer = GearLayer::create(nullptr);
+		_gearLayer = layer;
+		layer->updatePlayerGear();
+		if (getHudLayer())
+			getHudLayer()->addChild(layer, 9999);
+		else
+			addChild(layer, 9999);
+		return;
+	}
 
 	RenderTexture *snapshoot = RenderTexture::create(winSize.width, winSize.height);
 	Scene *f = Director::sharedDirector()->getRunningScene();
@@ -1503,12 +1554,28 @@ void GameLayer::onGameOver(bool isWin)
 	if (_isPause)
 	{
 		_isPause = false;
-		Director::sharedDirector()->popScene();
+		if (_pauseLayer)
+		{
+			_pauseLayer->removeFromParent();
+			_pauseLayer = nullptr;
+		}
+		else
+		{
+			Director::sharedDirector()->popScene();
+		}
 	}
 	if (_isGear)
 	{
 		_isGear = false;
-		Director::sharedDirector()->popScene();
+		if (_gearLayer)
+		{
+			_gearLayer->removeFromParent();
+			_gearLayer = nullptr;
+		}
+		else
+		{
+			Director::sharedDirector()->popScene();
+		}
 	}
 
 	RenderTexture *snapshoot = RenderTexture::create(winSize.width, winSize.height);

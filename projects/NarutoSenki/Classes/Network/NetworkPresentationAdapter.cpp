@@ -1,5 +1,6 @@
 #include "NetworkPresentationAdapter.hpp"
 #include "CharacterBase.h"
+#include "Core/Hero.hpp"
 #include "GameLayer.h"
 #include "HPBar.h"
 #include "HudLayer.h"

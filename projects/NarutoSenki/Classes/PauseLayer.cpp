@@ -132,8 +132,6 @@ void PauseLayer::onPreload(Ref *sender)
 void PauseLayer::onResume(Ref *sender)
 {
 	auto *gameLayer = getGameLayer();
-	const bool isNet = gameLayer && gameLayer->isNetworkBattle();
-
 	if (UserDefault::sharedUserDefault()->getBoolForKey("isBGM"))
 	{
 		SimpleAudioEngine::sharedEngine()->resumeBackgroundMusic();
@@ -143,17 +141,16 @@ void PauseLayer::onResume(Ref *sender)
 		SimpleAudioEngine::sharedEngine()->resumeAllEffects();
 	}
 
-	if (isNet)
+	if (gameLayer && gameLayer->isNetworkBattle())
 	{
-		removeFromParent();
+		gameLayer->resumeFromPause();
 	}
 	else
 	{
 		Director::sharedDirector()->popScene();
+		if (gameLayer)
+			gameLayer->_isPause = false;
 	}
-
-	if (gameLayer)
-		gameLayer->_isPause = false;
 }
 
 void PauseLayer::onBackToMenu(Ref *sender)
@@ -190,24 +187,19 @@ void PauseLayer::onLeft(Ref *sender)
 {
 	SimpleAudioEngine::sharedEngine()->playEffect("Audio/Menu/confirm.ogg");
 	auto *gameLayer = getGameLayer();
-	const bool isNet = gameLayer && gameLayer->isNetworkBattle();
+	if (!gameLayer)
+		return;
 
-	if (gameLayer)
-		gameLayer->_isSurrender = true;
-
-	if (isNet)
+	gameLayer->_isSurrender = true;
+	if (gameLayer->isNetworkBattle())
 	{
-		removeFromParent();
-		if (gameLayer)
-			gameLayer->onGameOver(false);
+		gameLayer->onGameOver(false);
 	}
 	else
 	{
 		Director::sharedDirector()->popScene();
-	}
-
-	if (gameLayer)
 		gameLayer->_isPause = false;
+	}
 }
 
 void PauseLayer::onCancel(Ref *sender)

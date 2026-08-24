@@ -331,18 +331,18 @@ void GearLayer::onResume(Ref *sender)
 	if (gameLayer && gameLayer->getHudLayer())
 		gameLayer->getHudLayer()->updateGears();
 
-	const bool isNet = gameLayer && gameLayer->isNetworkBattle();
-	if (isNet)
+	if (gameLayer && gameLayer->isNetworkBattle())
 	{
+		gameLayer->_isGear = false;
+		gameLayer->_gearLayer = nullptr;
 		removeFromParent();
 	}
 	else
 	{
 		Director::sharedDirector()->popScene();
+		if (gameLayer)
+			gameLayer->_isGear = false;
 	}
-
-	if (gameLayer)
-		gameLayer->_isGear = false;
 }
 
 void GearLayer::onGearBuy(Ref *sender)

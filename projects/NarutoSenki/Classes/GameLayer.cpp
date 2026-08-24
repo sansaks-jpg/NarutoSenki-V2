@@ -1486,19 +1486,18 @@ void GameLayer::resumeFromPause()
 		SimpleAudioEngine::sharedEngine()->resumeAllEffects();
 	}
 
-	if (_networkBattle)
+	if (_pauseLayer)
 	{
-		if (_pauseLayer)
-		{
-			_pauseLayer->removeFromParent();
-			_pauseLayer = nullptr;
-		}
+		auto *layer = _pauseLayer;
+		_pauseLayer = nullptr;
+		_isPause = false;
+		layer->removeFromParent();
 	}
 	else
 	{
 		Director::sharedDirector()->popScene();
+		_isPause = false;
 	}
-	_isPause = false;
 }
 
 void GameLayer::onGear()
@@ -1551,49 +1550,55 @@ void GameLayer::onGameOver(bool isWin)
 		_networkBattle = false;
 	}
 
-	if (_isPause)
+	if (_pauseLayer)
+	{
+		auto *layer = _pauseLayer;
+		_pauseLayer = nullptr;
+		_isPause = false;
+		layer->removeFromParent();
+	}
+	else if (_isPause)
 	{
 		_isPause = false;
-		if (_pauseLayer)
-		{
-			_pauseLayer->removeFromParent();
-			_pauseLayer = nullptr;
-		}
-		else
-		{
-			Director::sharedDirector()->popScene();
-		}
+		Director::sharedDirector()->popScene();
 	}
-	if (_isGear)
+
+	if (_gearLayer)
+	{
+		auto *layer = _gearLayer;
+		_gearLayer = nullptr;
+		_isGear = false;
+		layer->removeFromParent();
+	}
+	else if (_isGear)
 	{
 		_isGear = false;
-		if (_gearLayer)
-		{
-			_gearLayer->removeFromParent();
-			_gearLayer = nullptr;
-		}
-		else
-		{
-			Director::sharedDirector()->popScene();
-		}
+		Director::sharedDirector()->popScene();
 	}
 
 	RenderTexture *snapshoot = RenderTexture::create(winSize.width, winSize.height);
 	Scene *f = Director::sharedDirector()->getRunningScene();
-	Ref *pObject = f->getChildren()->objectAtIndex(0);
-	BGLayer *bg = (BGLayer *)pObject;
-	snapshoot->begin();
-	bg->visit();
-	visit();
-	snapshoot->end();
+	if (f && f->getChildren() && f->getChildren()->count() > 0)
+	{
+		Ref *pObject = f->getChildren()->objectAtIndex(0);
+		BGLayer *bg = dynamic_cast<BGLayer *>(pObject);
+		snapshoot->begin();
+		if (bg)
+			bg->visit();
+		visit();
+		snapshoot->end();
+	}
 
 	getGameModeHandler()->Internal_GameOver();
 
 	Scene *pscene = Scene::create();
 	GameOver *layer = GameOver::create(snapshoot);
-	layer->setWin(isWin);
-	pscene->addChild(layer);
-	Director::sharedDirector()->pushScene(pscene);
+	if (layer)
+	{
+		layer->setWin(isWin);
+		pscene->addChild(layer);
+		Director::sharedDirector()->pushScene(pscene);
+	}
 }
 
 void GameLayer::onLeft()

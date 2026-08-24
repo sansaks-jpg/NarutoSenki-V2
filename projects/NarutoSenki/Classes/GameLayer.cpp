@@ -1019,7 +1019,7 @@ void GameLayer::updateNetworkBattle(float dt)
 
 			if (_netPresentation)
 			{
-				_netPresentation->applyAuthoritativeSnapshot(snapshot, currentPlayer ? currentPlayer->getSpeed() : 3.0f);
+				_netPresentation->applyAuthoritativeSnapshot(snapshot, currentPlayer ? static_cast<float>(currentPlayer->getWalkSpeed()) : 3.0f);
 			}
 
 			for (const auto &charState : snapshot.characters)
@@ -1354,7 +1354,7 @@ void GameLayer::JoyStickUpdate(Vec2 direction)
 
 			if (_netPresentation && currentPlayer)
 			{
-				_netPresentation->recordPredictedInput(command.sequence, command.tick, command.axisX, command.axisY, currentPlayer->getSpeed(), 0.033f);
+				_netPresentation->recordPredictedInput(command.sequence, command.tick, command.axisX, command.axisY, static_cast<float>(currentPlayer->getWalkSpeed()), 0.033f);
 			}
 		}
 	}

@@ -11,8 +11,11 @@ using namespace nsv2::network;
 
 namespace
 {
+int gWaitCheckpoint = 0;
+
 void waitFor(LanSession &host, LanSession &client, const std::function<bool()> &condition, int timeoutMs)
 {
+    const int checkpoint = ++gWaitCheckpoint;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
     while (std::chrono::steady_clock::now() < deadline)
     {
@@ -22,10 +25,21 @@ void waitFor(LanSession &host, LanSession &client, const std::function<bool()> &
             return;
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    std::cerr << "waitFor TIMEOUT: host state=" << static_cast<int>(host.state())
+    std::cerr << "waitFor TIMEOUT checkpoint=" << checkpoint
+              << ": host state=" << static_cast<int>(host.state())
               << ", client state=" << static_cast<int>(client.state())
               << ", host remoteConn=" << host.remoteConnected()
               << ", client remoteConn=" << client.remoteConnected() << std::endl;
+    SessionDiagnostics hd;
+    SessionDiagnostics cd;
+    host.getDiagnostics(hd);
+    client.getDiagnostics(cd);
+    std::cerr << "host diag: match=" << hd.matchId << " ack=" << hd.lastAckedByRemote
+              << " remoteSeq=" << hd.remoteSequenceWatermark
+              << " pending=" << hd.pendingReliableCount << std::endl;
+    std::cerr << "client diag: match=" << cd.matchId << " ack=" << cd.lastAckedByRemote
+              << " remoteSeq=" << cd.remoteSequenceWatermark
+              << " pending=" << cd.pendingReliableCount << std::endl;
     assert(condition());
 }
 
@@ -78,7 +92,6 @@ int main()
                host.remoteConnected() && client.remoteConnected();
     }, 4000);
 
-    // Gear is intentionally disabled until purchases/equips have authoritative LAN messages.
     assert(!host.matchConfig().enableGear);
     assert(!client.matchConfig().enableGear);
 
@@ -102,7 +115,6 @@ int main()
         return host.state() == SessionState::Loading && client.state() == SessionState::Loading;
     }, 3000);
 
-    // Exercise the client-finishes-first ordering explicitly.
     assert(client.markLoaded(&error));
     pump(host, client, 100);
     assert(host.state() == SessionState::Loading);
@@ -112,7 +124,6 @@ int main()
         return host.state() == SessionState::Battle && client.state() == SessionState::Battle;
     }, 3000);
 
-    // Continuous movement reaches host while newer state supersedes stale movement.
     InputCommand input;
     input.tick = 1;
     input.action = ActionType::Move;
@@ -156,10 +167,9 @@ int main()
         std::vector<InputCommand> cmds;
         host.drainInputCommands(cmds);
         for (const auto &c : cmds)
-            assert(c.sequence != 49); // stale positional input must not rewind movement
+            assert(c.sequence != 49);
     }
 
-    // Reliable discrete actions may arrive late and must fill sequence gaps.
     InputCommand discreteHigh;
     discreteHigh.sequence = 60;
     discreteHigh.tick = 5;
@@ -189,7 +199,6 @@ int main()
     }, 3000);
     assert(gapFilled);
 
-    // Duplicate delivery must not double-apply.
     InputCommand duplicate = discreteHigh;
     duplicate.tick = 6;
     assert(client.submitInput(duplicate, &error));
@@ -231,7 +240,6 @@ int main()
         assert(received);
     }
 
-    // Host snapshot is normalized with current epoch/checksum/input watermark.
     StateSnapshot snapshot;
     snapshot.matchId = host.matchConfig().matchId;
     snapshot.tick = 2;
@@ -258,7 +266,6 @@ int main()
     }, 3000);
     assert(snapshotReceived);
 
-    // ClientState validates ownership, integrity and monotonic tick ordering.
     StateSnapshot clientState;
     clientState.matchId = client.matchConfig().matchId;
     clientState.tick = 12;
@@ -293,7 +300,6 @@ int main()
         assert(states.empty());
     }
 
-    // Final verdict is reliable and acknowledged before teardown.
     assert(host.sendMatchEnd(1, &error));
     std::vector<uint8_t> ends;
     waitFor(host, client, [&]() {
@@ -306,7 +312,6 @@ int main()
     host.stop();
     client.stop();
 
-    // Disconnect/rejoin keeps slot state clean; a second client is rejected while occupied.
     {
         LanSession hostSession;
         LanSession client1;
@@ -364,7 +369,6 @@ int main()
             return hostSession.state() == SessionState::Loading && client2.state() == SessionState::Loading;
         }, 3000);
 
-        // Reverse ordering on second match: host loads first.
         assert(hostSession.markLoaded(&err));
         pump(hostSession, client2, 100);
         assert(hostSession.state() == SessionState::Loading);

@@ -47,6 +47,9 @@ struct UnitSnapshot;
 struct CharacterSnapshot;
 class AuthoritativeBattleState;
 class NetworkPresentationAdapter;
+// Implemented in NetworkPresentationAdapter.cpp. This stays on the Cocos main
+// thread and applies the validated client-owned position to the host world.
+void applyHostClientPosition(GameLayer *gameLayer, int slot, const Vec2 &position);
 } // namespace nsv2::network
 
 extern GameLayer *_gLayer;
@@ -233,18 +236,48 @@ private:
 	float _lastNetworkJoystickSendTime = 0.0f;
 	float _networkBattleTime = 0.0f;
 
-	// Host-authoritative network battle state.
 	bool _isNetworkHost = false;
 	uint32_t _netLastAppliedTick = 0;
 	uint8_t _netLastCharState[2] = {0, 0};
 	static constexpr float kNetInterpPeriod = 0.12f;
+
+	struct NetLerpTarget
+	{
+		float x = 0.0f;
+		float y = 0.0f;
+		int slot = -1;
+		bool hostClientHero = false;
+
+		NetLerpTarget &operator=(const Vec2 &value)
+		{
+			x = value.x;
+			y = value.y;
+			if (hostClientHero && slot >= 0)
+				nsv2::network::applyHostClientPosition(_gLayer, slot, value);
+			return *this;
+		}
+	};
+
 	struct NetLerp
 	{
 		Vec2 from;
-		Vec2 to;
+		NetLerpTarget to;
 		float t = 1.0f;
 	};
-	std::map<int, NetLerp> _netCharLerp;
+
+	class NetCharLerpMap : public std::map<int, NetLerp>
+	{
+	public:
+		NetLerp &operator[](int slot)
+		{
+			auto &lerp = std::map<int, NetLerp>::operator[](slot);
+			lerp.to.slot = slot;
+			lerp.to.hostClientHero = true;
+			return lerp;
+		}
+	};
+
+	NetCharLerpMap _netCharLerp;
 	std::map<int, NetLerp> _netUnitLerp;
 	std::map<int, Flog *> _netFlogMirrors;
 	CharacterBase *_netGuardianMirror = nullptr;
@@ -252,9 +285,6 @@ private:
 	uint16_t _netNextFlogId = 0;
 	uint32_t _netRngState = 1;
 
-	// Host holds the battle open briefly until the client acknowledges the
-	// authoritative verdict, so GameOver cleanup cannot close the UDP socket
-	// before MatchEnd is delivered.
 	bool _networkMatchEndPending = false;
 	bool _networkPendingWin = false;
 	float _networkMatchEndWait = 0.0f;

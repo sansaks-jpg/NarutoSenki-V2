@@ -85,7 +85,6 @@ public:
 
 	bool _isAttackButtonRelease;
 	bool _hasSpawnedGuardian;
-	// int _guardianNum;
 	vector<Flog *> _KonohaFlogArray;
 	vector<Flog *> _AkatsukiFlogArray;
 	vector<Tower *> _TowerArray;
@@ -132,12 +131,8 @@ public:
 	bool isNetworkHost() const { return _isNetworkHost; }
 	void updateNetworkBattle(float dt);
 	void applyNetworkCommand(const nsv2::network::InputCommand &command);
-	// Host side: applies the client-reported state of the client-owned hero.
 	void applyClientState(const nsv2::network::StateSnapshot &state);
-	// Client side: reconciles host-authoritative flogs/towers/guardian mirrors.
 	void applyNetworkUnits(const std::vector<nsv2::network::UnitSnapshot> &units);
-	// Deterministic PRNG seeded from MatchConfig::seed (replaces raw rand() for
-	// decisions that must match across devices).
 	uint32_t netRandom(uint32_t bound);
 
 	void JoyStickRelease();
@@ -215,6 +210,7 @@ private:
 
 	void setKeyEventHandler();
 	void removeKeyEventHandler();
+	void abortNetworkMatch();
 
 #if (CC_TARGET_PLATFORM == CC_PLATFORM_LINUX || CC_TARGET_PLATFORM == CC_PLATFORM_WIN32)
 	int _lastPressedMovementKey;
@@ -237,11 +233,9 @@ private:
 	float _lastNetworkJoystickSendTime = 0.0f;
 	float _networkBattleTime = 0.0f;
 
-	// --- Host-authoritative network battle state ---
+	// Host-authoritative network battle state.
 	bool _isNetworkHost = false;
-	// Stale-snapshot guard: only strictly newer snapshots are applied.
 	uint32_t _netLastAppliedTick = 0;
-	// Last authoritative State per hero slot (State enum as uint8_t).
 	uint8_t _netLastCharState[2] = {0, 0};
 	static constexpr float kNetInterpPeriod = 0.12f;
 	struct NetLerp
@@ -250,13 +244,20 @@ private:
 		Vec2 to;
 		float t = 1.0f;
 	};
-	std::map<int, NetLerp> _netCharLerp; // key: hero slot (0/1)
-	std::map<int, NetLerp> _netUnitLerp; // key: network unitId
-	std::map<int, Flog *> _netFlogMirrors; // unitId -> client-side flog mirror
+	std::map<int, NetLerp> _netCharLerp;
+	std::map<int, NetLerp> _netUnitLerp;
+	std::map<int, Flog *> _netFlogMirrors;
 	CharacterBase *_netGuardianMirror = nullptr;
 	int _netGuardianUnitId = -1;
 	uint16_t _netNextFlogId = 0;
 	uint32_t _netRngState = 1;
+
+	// Host holds the battle open briefly until the client acknowledges the
+	// authoritative verdict, so GameOver cleanup cannot close the UDP socket
+	// before MatchEnd is delivered.
+	bool _networkMatchEndPending = false;
+	bool _networkPendingWin = false;
+	float _networkMatchEndWait = 0.0f;
 
 	void advanceNetworkInterpolation(float dt);
 	void applyCharacterSnapshot(const nsv2::network::CharacterSnapshot &state);

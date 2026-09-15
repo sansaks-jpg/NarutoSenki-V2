@@ -1,4 +1,4 @@
-// Protocol unit tests for the LAN multiplayer wire format (v2).
+// Protocol unit tests for the LAN multiplayer wire format (v4).
 #include "Network/LanProtocol.hpp"
 
 #include <cassert>
@@ -33,9 +33,10 @@ void testMessageRoundTrip()
     assert(decoded.payload == source.payload);
 }
 
-void testMessageAckRoundTrip()
+void testReservedAckFieldRoundTrip()
 {
-    // v2: every frame carries a piggybacked cumulative input ack.
+    // v4 keeps the header ack field for wire-format stability. Runtime
+    // reliability uses explicit MessageType::Ack payloads instead.
     Message source;
     source.type = MessageType::ClientState;
     source.sequence = 7;
@@ -53,6 +54,17 @@ void testMessageAckRoundTrip()
     assert(consumed == bytes.size());
     assert(decoded.type == MessageType::ClientState);
     assert(decoded.sequence == 7 && decoded.tick == 9 && decoded.ack == 42);
+}
+
+void testSessionEpochVariesByMatch()
+{
+    const uint32_t a = computeSessionEpoch(0x1000u, 0x2000u);
+    const uint32_t b = computeSessionEpoch(0x1001u, 0x2000u);
+    const uint32_t c = computeSessionEpoch(0x1000u, 0x2001u);
+    assert(a != 0 && b != 0 && c != 0);
+    assert(a != b);
+    assert(a != c);
+    assert(b != c);
 }
 
 void testMatchConfigRoundTrip()
@@ -109,7 +121,6 @@ void testSnapshotRoundTrip()
 
 void testSnapshotUnitsRoundTrip()
 {
-    // v2: snapshots carry battlefield units and the match clock.
     StateSnapshot source;
     source.matchId = 1234;
     source.tick = 30;
@@ -129,11 +140,10 @@ void testSnapshotUnitsRoundTrip()
     assert(decoded.units.size() == 3);
     assert(decoded.units[0].unitId == 1 && decoded.units[0].kind == NetUnitKind::Tower);
     assert(decoded.units[1].unitId == 200 && decoded.units[1].kind == NetUnitKind::Guardian);
-    assert(decoded.units[1].variant == 3); // Han (bit0) + Akatsuki (bit1)
+    assert(decoded.units[1].variant == 3);
     assert(decoded.units[1].flipped);
     assert(decoded.units[2].unitId == 305 && decoded.units[2].kind == NetUnitKind::FlogAkatsuki);
 
-    // Truncated payload must fail cleanly instead of crashing.
     StateSnapshot bad;
     assert(!decodeStateSnapshot(std::vector<uint8_t>(bytes.begin(), bytes.begin() + 10), bad, &error));
 }
@@ -163,7 +173,6 @@ void testInputRoundTrip()
     assert(decoded.axisY == source.axisY);
     assert(decoded.isDiscreteAction == true);
 
-    // Test Skill actions
     source.action = ActionType::Skill1;
     source.isDiscreteAction = false;
     assert(encodeInputCommand(source, bytes, &error));
@@ -262,7 +271,6 @@ void testRejectsUnknownTypeAndVersion()
 
 void testAcceptsNewestMessageType()
 {
-    // v3 boundary: ClientState is the newest valid type; Error+1 must fail.
     Message source;
     source.type = MessageType::ClientState;
     source.payload = {1};
@@ -303,7 +311,8 @@ void testRejectsMalformedFrames()
 int main()
 {
     testMessageRoundTrip();
-    testMessageAckRoundTrip();
+    testReservedAckFieldRoundTrip();
+    testSessionEpochVariesByMatch();
     testMatchConfigRoundTrip();
     testInputRoundTrip();
     testSnapshotRoundTrip();
@@ -313,6 +322,6 @@ int main()
     testRejectsUnknownTypeAndVersion();
     testAcceptsNewestMessageType();
     testRejectsMalformedFrames();
-    std::cout << "lan_protocol_test: ok (v3)\n";
+    std::cout << "lan_protocol_test: ok (v4)\n";
     return 0;
 }

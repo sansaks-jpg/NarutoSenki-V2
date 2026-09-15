@@ -7,7 +7,9 @@
 namespace nsv2::network
 {
 
-constexpr uint16_t kProtocolVersion = 3;
+// v4 changes control/reliability semantics: delivery acknowledgements are
+// explicit MessageType::Ack payloads instead of a cumulative header watermark.
+constexpr uint16_t kProtocolVersion = 4;
 constexpr uint32_t kProtocolMagic = 0x3256534E; // "NSV2" in little-endian.
 // Frame layout: magic(u32) version(u16) type(u16) payloadLen(u32)
 //               sequence(u32) tick(u32) ack(u32).
@@ -39,7 +41,6 @@ enum class MessageType : uint16_t
     MatchEnd = 18,
     Resync = 19,
     Error = 20,
-    // Client -> Host authoritative state of the client-owned hero (v2/v3).
     ClientState = 21,
 };
 
@@ -77,8 +78,9 @@ struct Message
     MessageType type = MessageType::Error;
     uint32_t sequence = 0;
     uint32_t tick = 0;
-    // Piggybacked cumulative ack: highest remote input sequence the sender has
-    // processed. Used to clear the reliable-retransmit queue.
+    // Reserved for wire compatibility. v4 uses explicit Ack payloads so a
+    // missing lower sequence can never be incorrectly acknowledged by a
+    // later packet.
     uint32_t ack = 0;
     std::vector<uint8_t> payload;
 };
@@ -197,10 +199,7 @@ struct RoomAdvertisement
 // Computes a deterministic FNV-1a checksum over crucial simulation state.
 uint32_t computeStateChecksum(const StateSnapshot &snapshot);
 
-// Encodes a complete length-delimited frame suitable for TCP or a reliable packet.
 bool encodeMessage(const Message &message, std::vector<uint8_t> &out, std::string *error = nullptr);
-
-// Decodes one frame from bytes. `consumed` allows a TCP stream parser to retain trailing bytes.
 bool decodeMessage(const uint8_t *data, size_t size, Message &out, size_t &consumed, std::string *error = nullptr);
 inline bool decodeMessage(const std::vector<uint8_t> &data, Message &out, std::string *error = nullptr)
 {

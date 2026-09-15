@@ -21,6 +21,7 @@ public:
 
     bool startAdvertising(const RoomAdvertisement &room, std::string *error = nullptr);
     bool startScanning(std::string *error = nullptr);
+    void updateAdvertisement(const RoomAdvertisement &room);
     void poll(std::vector<RoomAdvertisement> &rooms);
     void stop();
 

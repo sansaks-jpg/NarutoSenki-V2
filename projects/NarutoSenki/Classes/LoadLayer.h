@@ -20,15 +20,17 @@ public:
 	PROP_PTR(HudLayer, _hudLayer, HudLayer);
 
 	bool _isHardCoreMode;
-    bool _enableGear;
-    bool _networkBattle = false;
-    uint8_t _networkLocalSlot = 0;
+	bool _enableGear;
+	bool _networkBattle = false;
+	uint8_t _networkLocalSlot = 0;
 
-    void configureNetworkBattle(uint8_t localSlot)
-    {
-        _networkBattle = true;
-        _networkLocalSlot = localSlot;
-    }
+	void configureNetworkBattle(uint8_t localSlot)
+	{
+		_networkBattle = true;
+		_networkLocalSlot = localSlot;
+		_networkLocalLoadComplete = false;
+		_networkSceneEntered = false;
+	}
 
 	void preloadAudio();
 	void preloadIMG();
@@ -43,6 +45,10 @@ public:
 
 private:
 	void setLoadingAnimation(const char *player, int index);
+	void enterGameScene();
+	void abortNetworkLoading();
 
+	bool _networkLocalLoadComplete = false;
+	bool _networkSceneEntered = false;
 	vector<string> loadVector;
 };

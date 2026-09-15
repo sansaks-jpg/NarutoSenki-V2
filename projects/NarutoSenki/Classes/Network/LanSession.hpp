@@ -169,6 +169,7 @@ private:
     uint32_t _lastAckedByRemote = 0;
     uint64_t _remoteRecentMask = 0;
     uint32_t _remoteSequenceWatermark = 0;
+    uint32_t _lastRemoteMoveSequence = 0;
 
     uint32_t _lastRemoteHeroSequence = 0;
     uint32_t _lastRemoteReadySequence = 0;

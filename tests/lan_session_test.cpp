@@ -356,11 +356,14 @@ int main()
                    hostSession.matchConfig().slots[1].playerName == "Client2";
         }, 4000);
 
+        // No implicit Naruto/Sasuke selection: both peers must explicitly choose.
+        assert(hostSession.setLocalHero("Naruto"));
         assert(client2.setLocalHero("Kakashi"));
         assert(client2.setLocalReady(true));
         assert(hostSession.setLocalReady(true));
         waitFor(hostSession, client2, [&]() {
-            return hostSession.matchConfig().slots[1].heroName == "Kakashi" &&
+            return hostSession.matchConfig().slots[0].heroName == "Naruto" &&
+                   hostSession.matchConfig().slots[1].heroName == "Kakashi" &&
                    hostSession.matchConfig().slots[0].ready && hostSession.matchConfig().slots[1].ready;
         }, 3000);
 

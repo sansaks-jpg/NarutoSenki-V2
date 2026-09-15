@@ -39,9 +39,6 @@ public:
 	bool useMask2;
 
 	bool hasSelected;
-	// IGameModeHandler *handler;
-
-	// static const GameModeData &from(const char *path);
 };
 
 struct GameData
@@ -49,9 +46,7 @@ struct GameData
 	bool enableGear = true;
 	bool isHardCore = true;
 	bool isRandomChar = false;
-
 	bool use4v4SpawnLayout = false;
-
 	Group playerGroup;
 };
 
@@ -63,25 +58,20 @@ class IGameModeHandler
 
 private:
 	vector<HeroData> heroDataVector;
-	// map
 	int mapId = 0;
-	// tower
 	bool enableKonohaTowers = true;
 	bool enableAkatsukiTowers = true;
-	// flog
 	bool skipInitFlogs = false;
 	bool enableKonohaFlogs = false;
 	bool enableAkatsukiFlogs = false;
 	float flogSpawnDuration = 15.0f;
 	bool isLimitFlog = false;
-	int maxFlogWaves;
-	// hero
+	int maxFlogWaves = -1;
 	bool enableHeroReborn = true;
 
 	void Internal_GameOver()
 	{
 		onGameOver();
-
 		gd = {};
 		clearHeroArray();
 		resetCheats();
@@ -89,11 +79,9 @@ private:
 
 protected:
 	SelectLayer *selectLayer = nullptr;
-	// game
 	GameData gd;
 	int oldCheats = -1;
 	vector<string> heroVector;
-	// player
 	Group playerGroup;
 
 public:
@@ -102,12 +90,10 @@ public:
 	const Group kDefaultGroup = Group::Konoha;
 
 	virtual void init() = 0;
-
 	virtual void onInitHeros() = 0;
 	virtual void onGameStart() = 0;
 	virtual void onGameOver() = 0;
 
-	// callbacks
 	virtual void onCharacterInit(CharacterBase *c) = 0;
 	virtual void onCharacterDead(CharacterBase *c) = 0;
 	virtual void onCharacterReborn(CharacterBase *c) = 0;
@@ -126,15 +112,32 @@ public:
 	inline const vector<HeroData> &getHerosArray() { return heroDataVector; }
 
 	// Builds a deterministic two-player roster supplied by the LAN host.
+	// This is a hard mode boundary: reset both derived-mode state and all base
+	// runtime toggles so an earlier offline/hardcore match cannot leak into LAN.
 	void initNetworkHeros(const nsv2::network::MatchConfig &config, uint8_t localSlot)
 	{
+		init();
 		clearHeroArray();
+
+		mapId = static_cast<int>(config.mapId);
+		enableKonohaTowers = true;
+		enableAkatsukiTowers = true;
+		skipInitFlogs = false;
+		enableKonohaFlogs = false;
+		enableAkatsukiFlogs = false;
+		flogSpawnDuration = 15.0f;
+		isLimitFlog = false;
+		maxFlogWaves = -1;
+		enableHeroReborn = config.enableReborn;
+
 		gd = {};
 		gd.enableGear = config.enableGear;
-		gd.isHardCore = !config.enableGear;
+		// Disabling the unsynchronised gear shop in LAN must not implicitly
+		// enable Hardcore guardian rules. LAN remains the standard 1v1 ruleset.
+		gd.isHardCore = false;
 		gd.isRandomChar = false;
 		gd.use4v4SpawnLayout = false;
-		setHero(config.enableReborn);
+
 		for (const auto &slot : config.slots)
 		{
 			if (slot.heroName.empty())
@@ -152,18 +155,12 @@ public:
 	}
 
 protected:
-	// IGameModeHandler()
-	// {
-	// 	oldCheats = Cheats;
-	// }
-
 	void clearHeroArray()
 	{
 		heroDataVector.clear();
 		heroVector.clear();
 	}
 
-	// Warpper of game layer
 	void setMap(int id)
 	{
 		this->mapId = id;
@@ -189,7 +186,6 @@ protected:
 		this->enableHeroReborn = enableReborn;
 	}
 
-	// init hero
 	inline void addHero(const char *name, Role role, Group group, uint32_t lv = 1)
 	{
 		heroDataVector.push_back({name, role, group});
@@ -227,8 +223,6 @@ protected:
 		enemyCount = enemyCount > kMaxCharCount ? kMaxCharCount : enemyCount;
 		setRand();
 		int team = random(2);
-		// TODO: Support custom player group
-		// playerGroup = playerGroup == nullptr ? (team > 0 ? Group::Konoha : Group::Akatsuki) : playerGroup;
 		playerGroup = team > 0 ? Group::Akatsuki : Group::Konoha;
 		this->gd.playerGroup = playerGroup;
 		this->playerGroup = playerGroup;
@@ -245,7 +239,6 @@ protected:
 		if (com3Select)
 			selectLayer->_com3Select = com3Select;
 
-		// init player hero
 		string tmpChar;
 		if (selectLayer->_playerSelect)
 		{
@@ -269,11 +262,9 @@ protected:
 			gd.isRandomChar = true;
 		}
 
-		// push player
 		heroDataVector.push_back({tmpChar, Role::Player, playerGroup});
 		heroVector.push_back(tmpChar);
 
-		// init com heros
 		vector<string> realHeroVector;
 		for (size_t i = 0; i < kHeroNum; i++)
 		{
@@ -342,10 +333,6 @@ protected:
 		gd.playerGroup = group;
 	}
 
-	/**
-	 * Static Utils
-	 */
-
 	static inline const char *getRandomHero()
 	{
 		setRand();
@@ -362,10 +349,7 @@ protected:
 				i = random(kHeroNum);
 			return kHeroList[i];
 		}
-		else
-		{
-			return kHeroList[random(kHeroNum)];
-		}
+		return kHeroList[random(kHeroNum)];
 	}
 
 	static inline const char *getRandomHeroExceptAll(const vector<string> &excepts, const char *defaultChar = "Naruto")
@@ -373,7 +357,7 @@ protected:
 		auto _begin = excepts.begin();
 		auto _end = excepts.end();
 		int idx;
-		for (size_t i = 0; i < kHeroNum * 2; i++) // Max loops is kHeroNum * 2
+		for (size_t i = 0; i < kHeroNum * 2; i++)
 		{
 			setRand();
 			idx = random(kHeroNum);

@@ -48,6 +48,7 @@ struct SessionDiagnostics
     uint32_t lastRemoteInputSequence = 0;
     uint32_t lastAckedByRemote = 0;
     uint32_t remoteSequenceWatermark = 0;
+    uint32_t lastClientStateTick = 0;
     size_t pendingReliableCount = 0;
     size_t inputQueueDepth = 0;
     size_t snapshotQueueDepth = 0;
@@ -82,15 +83,17 @@ public:
     bool markLoaded(std::string *error = nullptr);
     bool submitInput(const InputCommand &command, std::string *error = nullptr);
     void drainInputCommands(std::vector<InputCommand> &commands);
-    // Host -> Client full authoritative world snapshot.
+
     bool sendSnapshot(const StateSnapshot &snapshot, std::string *error = nullptr);
     void drainSnapshots(std::vector<StateSnapshot> &snapshots);
-    // Client -> Host authoritative state of the client-owned hero.
+
     bool sendClientState(const StateSnapshot &state, std::string *error = nullptr);
     void drainClientStates(std::vector<StateSnapshot> &states);
-    // Host -> Client final match verdict (payload: winner GroupId).
+
     bool sendMatchEnd(uint8_t winnerGroup, std::string *error = nullptr);
     void drainMatchEnds(std::vector<uint8_t> &winners);
+    bool matchEndPending() const { return _matchEndSequence != 0 && !_matchEndAcknowledged; }
+    bool matchEndAcknowledged() const { return _matchEndAcknowledged; }
 
     void drainNotices(std::vector<SessionNotice> &notices);
     void getDiagnostics(SessionDiagnostics &out) const;
@@ -112,20 +115,30 @@ private:
     void setState(SessionState state, const std::string &notice);
     void handleTransportEvents(const std::vector<TransportEvent> &events);
     void handleMessage(const TransportEvent &event);
+    void handleHello(const TransportEvent &event);
     void sendLobbyUpdate();
     bool sendToRemote(const Message &message, std::string *error = nullptr);
+    bool sendReliable(Message message, bool replaceSameType, bool critical,
+                      std::string *error = nullptr);
+    void sendDeliveryAck(uint32_t sequence);
+    void acknowledgeReliable(uint32_t sequence);
     bool sendLoadedToHost(std::string *error);
+    void maybeSendBattleReady(std::string *error = nullptr);
     void initializeConfig();
     bool updateRemoteHero(const std::string &heroName);
     bool validateInput(const InputCommand &command, std::string *error) const;
     void processReliableQueue(uint64_t nowMs);
     void clearBattleQueues();
+    bool isExpectedPeer(const TransportEvent &event) const;
+    bool tryAcceptRemoteSequence(uint32_t sequence);
+    void updateDiscoveryCapacity(uint8_t playerCount);
 
     struct PendingReliable
     {
         Message message;
         uint64_t lastSendMs = 0;
         int attempts = 0;
+        bool critical = false;
     };
 
     LanTransport _transport;
@@ -143,22 +156,33 @@ private:
     bool _remoteLoaded = false;
     uint32_t _nextSequence = 1;
     MatchConfig _config;
+    RoomAdvertisement _roomAdvertisement;
+
     std::deque<SessionNotice> _notices;
     std::deque<InputCommand> _inputCommands;
     std::deque<StateSnapshot> _snapshots;
     std::deque<StateSnapshot> _clientStates;
     std::deque<uint8_t> _matchEnds;
     std::vector<PendingReliable> _pendingReliable;
+
     uint32_t _lastRemoteInputSequence = 0;
-    // Highest sequence of OUR inputs the remote peer has acked back to us.
     uint32_t _lastAckedByRemote = 0;
-    // Replay window: bit i of the mask is set when sequence
-    // (_remoteSequenceWatermark - i) was already accepted/applied. Lets late
-    // retransmits fill gaps while rejecting replays of applied inputs.
     uint64_t _remoteRecentMask = 0;
     uint32_t _remoteSequenceWatermark = 0;
-    bool tryAcceptRemoteSequence(uint32_t sequence);
+
+    uint32_t _lastRemoteHeroSequence = 0;
+    uint32_t _lastRemoteReadySequence = 0;
+    uint32_t _lastLobbyUpdateSequence = 0;
+    uint32_t _lastMatchStartSequence = 0;
+    uint32_t _lastClientStateTick = 0;
+    uint32_t _lastSnapshotTick = 0;
+
+    uint32_t _battleReadySequence = 0;
+    uint32_t _matchEndSequence = 0;
+    bool _matchEndAcknowledged = false;
+
     uint64_t _sessionStartedMs = 0;
+    uint64_t _stateEnteredMs = 0;
     uint64_t _lastReceiveMs = 0;
     uint64_t _lastHeartbeatMs = 0;
     uint64_t _lastHelloSendMs = 0;

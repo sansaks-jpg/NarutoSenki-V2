@@ -35,6 +35,9 @@ using NativeSocket = int;
 constexpr NativeSocket kInvalidSocket = -1;
 #endif
 
+constexpr size_t kMaxQueuedEvents = 2048;
+constexpr size_t kMaxUdpDatagramBytes = 65507;
+
 NativeSocket nativeSocket(intptr_t value)
 {
     return static_cast<NativeSocket>(value);
@@ -80,6 +83,15 @@ void setError(std::string *error, const std::string &value)
     if (error)
         *error = value;
 }
+
+void addUniqueAddress(std::vector<std::string> &targets, const std::string &address)
+{
+    if (!address.empty() && address != "0.0.0.0" &&
+        std::find(targets.begin(), targets.end(), address) == targets.end())
+    {
+        targets.push_back(address);
+    }
+}
 } // namespace
 
 LanTransport::LanTransport() = default;
@@ -98,12 +110,16 @@ bool LanTransport::openSocket(uint16_t port, bool enableBroadcast, std::string *
         setError(error, "WSAStartup failed");
         return false;
     }
+    const auto cleanupWinsockOnFailure = []() { WSACleanup(); };
 #endif
 
     NativeSocket socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (socket == kInvalidSocket)
     {
         setError(error, "socket(): " + lastSocketError());
+#if defined(_WIN32)
+        cleanupWinsockOnFailure();
+#endif
         return false;
     }
 
@@ -113,6 +129,9 @@ bool LanTransport::openSocket(uint16_t port, bool enableBroadcast, std::string *
     {
         setError(error, "setsockopt(SO_REUSEADDR): " + lastSocketError());
         closeNativeSocket(socket);
+#if defined(_WIN32)
+        cleanupWinsockOnFailure();
+#endif
         return false;
     }
 
@@ -124,6 +143,9 @@ bool LanTransport::openSocket(uint16_t port, bool enableBroadcast, std::string *
         {
             setError(error, "setsockopt(SO_BROADCAST): " + lastSocketError());
             closeNativeSocket(socket);
+#if defined(_WIN32)
+            cleanupWinsockOnFailure();
+#endif
             return false;
         }
     }
@@ -136,6 +158,9 @@ bool LanTransport::openSocket(uint16_t port, bool enableBroadcast, std::string *
     {
         setError(error, "bind(): " + lastSocketError());
         closeNativeSocket(socket);
+#if defined(_WIN32)
+        cleanupWinsockOnFailure();
+#endif
         return false;
     }
 
@@ -149,6 +174,9 @@ bool LanTransport::openSocket(uint16_t port, bool enableBroadcast, std::string *
     {
         setError(error, "non-blocking socket setup failed: " + lastSocketError());
         closeNativeSocket(socket);
+#if defined(_WIN32)
+        cleanupWinsockOnFailure();
+#endif
         return false;
     }
 
@@ -219,6 +247,11 @@ bool LanTransport::sendRaw(const std::vector<uint8_t> &bytes, const std::string 
         setError(error, "cannot send empty packet");
         return false;
     }
+    if (bytes.size() > kMaxUdpDatagramBytes)
+    {
+        setError(error, "UDP datagram exceeds IPv4 payload limit");
+        return false;
+    }
     if (address.empty() || port == 0)
     {
         setError(error, "destination address and port are required");
@@ -275,30 +308,36 @@ std::vector<std::string> LanTransport::getBroadcastAddresses()
     std::vector<std::string> targets;
     targets.push_back("255.255.255.255");
 #if defined(_WIN32)
-    char hostname[256] = {};
-    if (gethostname(hostname, sizeof(hostname)) == 0)
+    // Use Winsock's interface table so the real subnet mask is respected.
+    // The previous implementation always replaced the final octet with 255,
+    // which is incorrect for non-/24 Wi-Fi/hotspot networks.
+    SOCKET probe = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (probe != INVALID_SOCKET)
     {
-        hostent *host = gethostbyname(hostname);
-        if (host && host->h_addr_list)
+        INTERFACE_INFO interfaces[64] = {};
+        DWORD bytesReturned = 0;
+        if (WSAIoctl(probe, SIO_GET_INTERFACE_LIST, nullptr, 0,
+                     interfaces, sizeof(interfaces), &bytesReturned,
+                     nullptr, nullptr) == 0)
         {
-            for (int i = 0; host->h_addr_list[i] != nullptr; ++i)
+            const size_t count = bytesReturned / sizeof(INTERFACE_INFO);
+            for (size_t i = 0; i < count; ++i)
             {
-                in_addr addr;
-                memcpy(&addr, host->h_addr_list[i], sizeof(in_addr));
+                if (!(interfaces[i].iiFlags & IFF_UP) ||
+                    (interfaces[i].iiFlags & IFF_LOOPBACK))
+                    continue;
+                const auto *addr = reinterpret_cast<const sockaddr_in *>(&interfaces[i].iiAddress);
+                const auto *mask = reinterpret_cast<const sockaddr_in *>(&interfaces[i].iiNetmask);
+                const uint32_t ip = ntohl(addr->sin_addr.s_addr);
+                const uint32_t netmask = ntohl(mask->sin_addr.s_addr);
+                in_addr broadcast{};
+                broadcast.s_addr = htonl(ip | ~netmask);
                 char ipBuf[INET_ADDRSTRLEN] = {};
-                if (inet_ntop(AF_INET, &addr, ipBuf, sizeof(ipBuf)))
-                {
-                    std::string ipStr(ipBuf);
-                    size_t lastDot = ipStr.rfind('.');
-                    if (lastDot != std::string::npos)
-                    {
-                        std::string subnetBcast = ipStr.substr(0, lastDot) + ".255";
-                        if (std::find(targets.begin(), targets.end(), subnetBcast) == targets.end())
-                            targets.push_back(subnetBcast);
-                    }
-                }
+                if (inet_ntop(AF_INET, &broadcast, ipBuf, sizeof(ipBuf)))
+                    addUniqueAddress(targets, ipBuf);
             }
         }
+        closesocket(probe);
     }
 #else
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -326,14 +365,7 @@ std::vector<std::string> LanTransport::getBroadcastAddresses()
                             auto *sin = reinterpret_cast<sockaddr_in *>(&bcastReq.ifr_broadaddr);
                             char ipBuf[INET_ADDRSTRLEN] = {};
                             if (inet_ntop(AF_INET, &sin->sin_addr, ipBuf, sizeof(ipBuf)))
-                            {
-                                std::string addrStr(ipBuf);
-                                if (!addrStr.empty() && addrStr != "0.0.0.0" &&
-                                    std::find(targets.begin(), targets.end(), addrStr) == targets.end())
-                                {
-                                    targets.push_back(addrStr);
-                                }
-                            }
+                                addUniqueAddress(targets, ipBuf);
                         }
                     }
                 }
@@ -344,10 +376,7 @@ std::vector<std::string> LanTransport::getBroadcastAddresses()
 #endif
     static const char *fallbackSubnets[] = {"192.168.43.255", "192.168.1.255", "192.168.0.255", "10.0.2.255"};
     for (const char *fb : fallbackSubnets)
-    {
-        if (std::find(targets.begin(), targets.end(), fb) == targets.end())
-            targets.push_back(fb);
-    }
+        addUniqueAddress(targets, fb);
     return targets;
 }
 
@@ -440,6 +469,11 @@ bool LanTransport::broadcast(const Message &message, uint16_t discoveryPort, std
 void LanTransport::pushEvent(TransportEvent event)
 {
     std::lock_guard<std::mutex> lock(_eventMutex);
+    // A paused/backgrounded main thread must not allow an unbounded receive
+    // queue to grow indefinitely. Dropping the oldest event is safer because
+    // current UDP state/snapshots supersede stale traffic.
+    if (_events.size() >= kMaxQueuedEvents)
+        _events.pop_front();
     _events.push_back(std::move(event));
 }
 
@@ -538,6 +572,14 @@ void LanTransport::stop()
         WSACleanup();
 #endif
     }
+
+    // Never carry datagrams/events from a previous room into a restarted
+    // transport. This is a session-generation boundary.
+    {
+        std::lock_guard<std::mutex> lock(_eventMutex);
+        _events.clear();
+    }
+
     _localPort = 0;
     _isHost = false;
     _remoteAddress.clear();

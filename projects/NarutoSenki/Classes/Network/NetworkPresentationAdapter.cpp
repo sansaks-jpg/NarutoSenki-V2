@@ -16,10 +16,41 @@ namespace nsv2::network
 
 namespace
 {
-constexpr float kSnapThreshold = 40.0f; // in Cocos2d-x points
 constexpr size_t kMaxDedupEvents = 256;
 constexpr size_t kMaxUnackedInputs = 60;
 } // namespace
+
+void applyHostClientPosition(GameLayer *gameLayer, int slot, const Vec2 &position)
+{
+    if (!gameLayer || !gameLayer->isNetworkBattle() || !gameLayer->isNetworkHost() ||
+        slot < 0 || slot >= static_cast<int>(gameLayer->_CharacterArray.size()))
+        return;
+
+    auto *character = gameLayer->_CharacterArray[static_cast<size_t>(slot)];
+    if (!character || character->getState() == State::DEAD)
+        return;
+
+    float x = position.x;
+    float y = position.y;
+    if (gameLayer->currentMap)
+    {
+        const float maxX = gameLayer->currentMap->getMapSize().width *
+                           gameLayer->currentMap->getTileSize().width;
+        const float maxY = gameLayer->currentMap->getTileSize().height * 5.5f;
+        x = std::clamp(x, 0.0f, maxX);
+        y = std::clamp(y, 0.0f, maxY);
+    }
+
+    // Client-owned movement is accepted only after LanSession has validated
+    // peer endpoint, match id, session epoch, checksum and monotonically newer
+    // ClientState tick. Apply it to the actual host world so hitboxes, AI,
+    // towers and authoritative combat resolve at the coordinates the client
+    // is playing at. The old code only filled a lerp target that was never
+    // advanced on the host.
+    character->setPosition(Vec2(x, y));
+    gameLayer->reorderChild(character, -character->getPositionY());
+    CCNotificationCenter::sharedNotificationCenter()->postNotification("updateMap", character);
+}
 
 NetworkPresentationAdapter::NetworkPresentationAdapter() = default;
 
@@ -70,22 +101,24 @@ void NetworkPresentationAdapter::pruneAcknowledgedInputs(uint32_t ackSequence)
 
 void NetworkPresentationAdapter::reconcileLocalPosition(const CharacterSnapshot &authSnap, float speed)
 {
+    (void)speed;
     if (!_gameLayer || authSnap.slot >= _gameLayer->_CharacterArray.size())
         return;
     auto *localHero = _gameLayer->_CharacterArray[authSnap.slot];
     if (!localHero || localHero->getState() == State::DEAD)
         return;
 
-    float authX = authSnap.x / 100.0f;
-    float authY = authSnap.y / 100.0f;
+    const float authX = authSnap.x / 100.0f;
+    const float authY = authSnap.y / 100.0f;
+    const Vec2 currentPos = localHero->getPosition();
+    const float dx = currentPos.x - authX;
+    const float dy = currentPos.y - authY;
+    const float dist = std::sqrt(dx * dx + dy * dy);
 
-    Vec2 currentPos = localHero->getPosition();
-    float dx = currentPos.x - authX;
-    float dy = currentPos.y - authY;
-    float dist = std::sqrt(dx * dx + dy * dy);
-
-    // In 1v1 LAN, movement is locally simulated and reported via sendLocalClientState.
-    // Only snap on catastrophic desync / teleport / respawn (> 250 points) to avoid rubberbanding.
+    // The client owns prediction, but the host snapshot is still allowed to
+    // repair catastrophic divergence (respawn/teleport/corrupt local state).
+    // Normal movement should now stay close because the host applies each
+    // validated ClientState to its real world before building snapshots.
     if (dist > 250.0f)
     {
         localHero->setPosition(Vec2(authX, authY));
@@ -104,7 +137,7 @@ void NetworkPresentationAdapter::dispatchCombatEvents(const std::vector<CombatEv
     for (const auto &ev : events)
     {
         if (ev.eventId != 0 && hasRecentEvent(ev.eventId))
-            continue; // Deduplicate
+            continue;
 
         if (ev.eventId != 0)
         {
@@ -118,11 +151,8 @@ void NetworkPresentationAdapter::dispatchCombatEvents(const std::vector<CombatEv
         }
 
         if (_eventCallback)
-        {
             _eventCallback(ev);
-        }
 
-        // Apply visual/audio feedback for combat events
         if (!_gameLayer)
             continue;
 
@@ -132,9 +162,7 @@ void NetworkPresentationAdapter::dispatchCombatEvents(const std::vector<CombatEv
             {
                 auto *target = _gameLayer->_CharacterArray[ev.targetSlot];
                 if (target && target->getState() != State::DEAD)
-                {
                     SimpleAudioEngine::sharedEngine()->playEffect("Audio/Effect/hit.ogg");
-                }
             }
         }
         else if (ev.eventType == CombatEventType::KnockbackApplied)
@@ -143,9 +171,7 @@ void NetworkPresentationAdapter::dispatchCombatEvents(const std::vector<CombatEv
             {
                 auto *target = _gameLayer->_CharacterArray[ev.targetSlot];
                 if (target && target->getState() != State::DEAD)
-                {
                     target->setPosition(Vec2(target->getPositionX() + ev.value, target->getPositionY()));
-                }
             }
         }
     }
@@ -156,48 +182,40 @@ void NetworkPresentationAdapter::applyAuthoritativeSnapshot(const StateSnapshot 
     if (!_gameLayer)
         return;
 
-    // Stale snapshot rejection
     if (snapshot.tick <= _lastAppliedTick)
         return;
     _lastAppliedTick = snapshot.tick;
 
-    // Prune acknowledged prediction inputs
     pruneAcknowledgedInputs(snapshot.clientSequenceWatermark);
 
-    // Process characters
     for (const auto &charSnap : snapshot.characters)
     {
         if (charSnap.slot == _localSlot)
         {
             reconcileLocalPosition(charSnap, speed);
         }
-        else
+        else if (charSnap.slot < _gameLayer->_CharacterArray.size())
         {
-            // Remote character interpolation
-            if (charSnap.slot < _gameLayer->_CharacterArray.size())
+            auto *remoteChar = _gameLayer->_CharacterArray[charSnap.slot];
+            if (remoteChar)
             {
-                auto *remoteChar = _gameLayer->_CharacterArray[charSnap.slot];
-                if (remoteChar)
-                {
-                    auto &lerp = _remoteCharLerp[charSnap.slot];
-                    lerp.fromX = remoteChar->getPositionX();
-                    lerp.fromY = remoteChar->getPositionY();
-                    lerp.toX = charSnap.x / 100.0f;
-                    lerp.toY = charSnap.y / 100.0f;
-                    lerp.t = 0.0f;
-                    lerp.duration = 0.066f;
+                auto &lerp = _remoteCharLerp[charSnap.slot];
+                lerp.fromX = remoteChar->getPositionX();
+                lerp.fromY = remoteChar->getPositionY();
+                lerp.toX = charSnap.x / 100.0f;
+                lerp.toY = charSnap.y / 100.0f;
+                lerp.t = 0.0f;
+                lerp.duration = 0.066f;
 
-                    if (remoteChar->_isFlipped != charSnap.flipped)
-                    {
-                        remoteChar->_isFlipped = charSnap.flipped;
-                        remoteChar->setFlipX(charSnap.flipped);
-                    }
+                if (remoteChar->_isFlipped != charSnap.flipped)
+                {
+                    remoteChar->_isFlipped = charSnap.flipped;
+                    remoteChar->setFlipX(charSnap.flipped);
                 }
             }
         }
     }
 
-    // Process combat events with deduplication
     dispatchCombatEvents(snapshot.combatEvents);
 }
 
@@ -206,7 +224,6 @@ void NetworkPresentationAdapter::update(float dt)
     if (!_gameLayer)
         return;
 
-    // 1. Decay error offset smoothly for local hero
     if (std::abs(_errorOffsetX) > 0.01f || std::abs(_errorOffsetY) > 0.01f)
     {
         float decayFactor = std::exp(-_errorDecayRate * dt);
@@ -214,7 +231,6 @@ void NetworkPresentationAdapter::update(float dt)
         _errorOffsetY *= decayFactor;
     }
 
-    // 2. Advance interpolation for remote heroes
     for (auto &pair : _remoteCharLerp)
     {
         int slot = pair.first;

@@ -53,6 +53,17 @@ bool LanDiscovery::startScanning(std::string *error)
     return _scanning;
 }
 
+void LanDiscovery::updateAdvertisement(const RoomAdvertisement &room)
+{
+    if (!_advertising)
+        return;
+    _room = room;
+    if (_room.port == 0)
+        _room.port = kDefaultLanPort;
+    // Force the new capacity/state metadata onto the network on next poll.
+    _lastAdMs = 0;
+}
+
 void LanDiscovery::sendDiscoveryProbe()
 {
     if (!_scanning)
@@ -121,7 +132,6 @@ void LanDiscovery::poll(std::vector<RoomAdvertisement> &rooms)
 {
     const uint64_t now = nowMs();
 
-    // Broadcast room presence regularly while hosting
     if (_advertising && (now - _lastAdMs >= 1000))
     {
         Message adMsg;
@@ -135,17 +145,13 @@ void LanDiscovery::poll(std::vector<RoomAdvertisement> &rooms)
         _lastAdMs = now;
     }
 
-    // Send discovery probes regularly while scanning
     if (_scanning && (now - _lastProbeMs >= 600))
-    {
         sendDiscoveryProbe();
-    }
 
     std::vector<TransportEvent> events;
     _transport.poll(events);
     handleEvents(events);
 
-    // Clean up stale rooms (older than 4 seconds)
     if (_scanning)
     {
         _trackedRooms.erase(

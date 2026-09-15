@@ -1,4 +1,4 @@
-// Session integration tests: loopback host/client lifecycle + v2 authority flow.
+// Session integration tests: loopback host/client lifecycle + protocol v4 reliability/authority flow.
 #include "Network/LanSession.hpp"
 
 #include <cassert>
@@ -29,6 +29,17 @@ void waitFor(LanSession &host, LanSession &client, const std::function<bool()> &
     assert(condition());
 }
 
+void pump(LanSession &a, LanSession &b, int milliseconds)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        a.poll();
+        b.poll();
+        std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    }
+}
+
 void testOfflineDoesNotOpenSocket()
 {
     LanSession offline;
@@ -40,11 +51,21 @@ void testOfflineDoesNotOpenSocket()
     assert(rooms.empty());
     assert(!offline.networkActive());
 }
+
+void testSessionEpochIsPerMatch()
+{
+    const uint32_t epochA = computeSessionEpoch(100, 200);
+    const uint32_t epochB = computeSessionEpoch(101, 201);
+    assert(epochA != 0);
+    assert(epochB != 0);
+    assert(epochA != epochB);
+}
 } // namespace
 
 int main()
 {
     testOfflineDoesNotOpenSocket();
+    testSessionEpochIsPerMatch();
 
     LanSession host;
     LanSession client;
@@ -56,6 +77,10 @@ int main()
         return host.state() == SessionState::Lobby && client.state() == SessionState::Lobby &&
                host.remoteConnected() && client.remoteConnected();
     }, 4000);
+
+    // Gear is intentionally disabled until purchases/equips have authoritative LAN messages.
+    assert(!host.matchConfig().enableGear);
+    assert(!client.matchConfig().enableGear);
 
     assert(host.setLocalHero("Naruto"));
     assert(client.setLocalHero("Sasuke"));
@@ -76,13 +101,18 @@ int main()
     waitFor(host, client, [&]() {
         return host.state() == SessionState::Loading && client.state() == SessionState::Loading;
     }, 3000);
-    assert(host.markLoaded(&error));
+
+    // Exercise the client-finishes-first ordering explicitly.
     assert(client.markLoaded(&error));
+    pump(host, client, 100);
+    assert(host.state() == SessionState::Loading);
+    assert(client.state() == SessionState::Loading);
+    assert(host.markLoaded(&error));
     waitFor(host, client, [&]() {
         return host.state() == SessionState::Battle && client.state() == SessionState::Battle;
     }, 3000);
 
-    // --- Input relay: discrete actions and movement both reach the host. ---
+    // Continuous movement reaches host while newer state supersedes stale movement.
     InputCommand input;
     input.tick = 1;
     input.action = ActionType::Move;
@@ -101,67 +131,76 @@ int main()
     }, 3000);
     assert(inputReceived);
 
-    // --- Out-of-order / retransmitted inputs are accepted (gap fill). ---
-    InputCommand ordered;
-    ordered.sequence = 50;
-    ordered.tick = 3;
-    ordered.action = ActionType::Move;
-    ordered.axisX = 500;
-    assert(client.submitInput(ordered, &error));
-    std::vector<InputCommand> accepted;
-    for (int i = 0; i < 200 && accepted.empty(); ++i)
-    {
-        client.poll();
-        host.poll();
-        std::vector<InputCommand> temp;
-        host.drainInputCommands(temp);
-        for (auto &c : temp)
-        {
-            if (c.sequence == 50)
-                accepted.push_back(std::move(c));
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
-    assert(accepted.size() == 1);
-    assert(accepted.front().sequence == 50);
+    InputCommand newestMove;
+    newestMove.sequence = 50;
+    newestMove.tick = 3;
+    newestMove.action = ActionType::Move;
+    newestMove.axisX = 500;
+    assert(client.submitInput(newestMove, &error));
+    bool newestMoveReceived = false;
+    waitFor(host, client, [&]() {
+        std::vector<InputCommand> cmds;
+        host.drainInputCommands(cmds);
+        for (const auto &c : cmds)
+            newestMoveReceived = newestMoveReceived || c.sequence == 50;
+        return newestMoveReceived;
+    }, 3000);
 
-    InputCommand outOfOrder = ordered; // seq 49 arrives after 50
-    outOfOrder.sequence = 49;
-    outOfOrder.tick = 4;
-    outOfOrder.axisX = -500;
-    assert(client.submitInput(outOfOrder, &error));
+    InputCommand staleMove = newestMove;
+    staleMove.sequence = 49;
+    staleMove.tick = 2;
+    staleMove.axisX = -500;
+    assert(client.submitInput(staleMove, &error));
+    pump(host, client, 250);
+    {
+        std::vector<InputCommand> cmds;
+        host.drainInputCommands(cmds);
+        for (const auto &c : cmds)
+            assert(c.sequence != 49); // stale positional input must not rewind movement
+    }
+
+    // Reliable discrete actions may arrive late and must fill sequence gaps.
+    InputCommand discreteHigh;
+    discreteHigh.sequence = 60;
+    discreteHigh.tick = 5;
+    discreteHigh.action = ActionType::Skill1;
+    assert(client.submitInput(discreteHigh, &error));
+    bool highReceived = false;
+    waitFor(host, client, [&]() {
+        std::vector<InputCommand> cmds;
+        host.drainInputCommands(cmds);
+        for (const auto &c : cmds)
+            highReceived = highReceived || c.sequence == 60;
+        return highReceived;
+    }, 3000);
+
+    InputCommand discreteGap = discreteHigh;
+    discreteGap.sequence = 59;
+    discreteGap.tick = 4;
+    discreteGap.action = ActionType::Skill2;
+    assert(client.submitInput(discreteGap, &error));
     bool gapFilled = false;
     waitFor(host, client, [&]() {
         std::vector<InputCommand> cmds;
         host.drainInputCommands(cmds);
         for (const auto &c : cmds)
-        {
-            if (c.sequence == 49 && c.axisX == -500)
-            {
-                gapFilled = true;
-                return true;
-            }
-        }
-        return false;
+            gapFilled = gapFilled || (c.sequence == 59 && c.action == ActionType::Skill2);
+        return gapFilled;
     }, 3000);
-    assert(gapFilled); // v2: retransmit fills the lost packet's slot
+    assert(gapFilled);
 
-    // --- Duplicate delivery must not double-apply. ---
-    InputCommand dupe = ordered; // seq 50 again
-    dupe.tick = 6;
-    assert(client.submitInput(dupe, &error));
-    for (int i = 0; i < 40; ++i) // drain window; duplicates are dropped
+    // Duplicate delivery must not double-apply.
+    InputCommand duplicate = discreteHigh;
+    duplicate.tick = 6;
+    assert(client.submitInput(duplicate, &error));
+    pump(host, client, 250);
     {
-        client.poll();
-        host.poll();
         std::vector<InputCommand> cmds;
         host.drainInputCommands(cmds);
         for (const auto &c : cmds)
-            assert(c.sequence != 50);
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            assert(c.sequence != 60);
     }
 
-    // --- All skill/item actions relay. ---
     ActionType testActions[] = {
         ActionType::NormalAttack,
         ActionType::Skill1,
@@ -174,8 +213,8 @@ int main()
     for (size_t i = 0; i < sizeof(testActions) / sizeof(testActions[0]); ++i)
     {
         InputCommand skillCmd;
-        skillCmd.sequence = 60 + i;
-        skillCmd.tick = 5 + i;
+        skillCmd.sequence = 70 + static_cast<uint32_t>(i);
+        skillCmd.tick = 10 + static_cast<uint32_t>(i);
         skillCmd.action = testActions[i];
         assert(client.submitInput(skillCmd, &error));
         bool received = false;
@@ -184,7 +223,7 @@ int main()
             host.drainInputCommands(cmds);
             for (const auto &c : cmds)
             {
-                if (c.action == testActions[i])
+                if (c.sequence == skillCmd.sequence && c.action == testActions[i])
                     received = true;
             }
             return received;
@@ -192,7 +231,7 @@ int main()
         assert(received);
     }
 
-    // --- Host snapshot with battlefield units reaches the client. ---
+    // Host snapshot is normalized with current epoch/checksum/input watermark.
     StateSnapshot snapshot;
     snapshot.matchId = host.matchConfig().matchId;
     snapshot.tick = 2;
@@ -201,16 +240,25 @@ int main()
     snapshot.units.push_back({1, NetUnitKind::Tower, 0, 300, 80, 45000, 0, false});
     snapshot.units.push_back({305, NetUnitKind::FlogKonoha, 0, 416, 120, 250, 1, false});
     assert(host.sendSnapshot(snapshot, &error));
+    bool snapshotReceived = false;
     waitFor(host, client, [&]() {
         std::vector<StateSnapshot> snapshots;
         client.drainSnapshots(snapshots);
-        return !snapshots.empty() &&
-               snapshots.front().characters.front().x == 100 &&
-               snapshots.front().units.size() == 2 &&
-               snapshots.front().elapsedSeconds == 33;
+        if (snapshots.empty())
+            return false;
+        const auto &received = snapshots.front();
+        assert(received.characters.front().x == 100);
+        assert(received.units.size() == 2);
+        assert(received.elapsedSeconds == 33);
+        assert(received.sessionEpoch == computeSessionEpoch(host.matchConfig().matchId, host.matchConfig().seed));
+        assert(received.stateChecksum == computeStateChecksum(received));
+        assert(received.clientSequenceWatermark >= 70);
+        snapshotReceived = true;
+        return true;
     }, 3000);
+    assert(snapshotReceived);
 
-    // --- ClientState: validated slot ownership, delivered to host. ---
+    // ClientState validates ownership, integrity and monotonic tick ordering.
     StateSnapshot clientState;
     clientState.matchId = client.matchConfig().matchId;
     clientState.tick = 12;
@@ -219,17 +267,33 @@ int main()
 
     StateSnapshot wrongSlot = clientState;
     wrongSlot.characters[0].slot = 0;
-    assert(!client.sendClientState(wrongSlot, &error)); // must own the slot
+    assert(!client.sendClientState(wrongSlot, &error));
 
+    bool clientStateReceived = false;
     waitFor(host, client, [&]() {
         std::vector<StateSnapshot> states;
         host.drainClientStates(states);
-        return !states.empty() &&
-               states.front().characters[0].slot == 1 &&
-               states.front().characters[0].x == 20500;
+        if (!states.empty())
+        {
+            assert(states.front().characters[0].slot == 1);
+            assert(states.front().characters[0].x == 20500);
+            clientStateReceived = true;
+        }
+        return clientStateReceived;
     }, 3000);
 
-    // --- MatchEnd verdict broadcast. ---
+    StateSnapshot staleClientState = clientState;
+    staleClientState.tick = 11;
+    staleClientState.characters[0].x = 9999;
+    assert(client.sendClientState(staleClientState, &error));
+    pump(host, client, 200);
+    {
+        std::vector<StateSnapshot> states;
+        host.drainClientStates(states);
+        assert(states.empty());
+    }
+
+    // Final verdict is reliable and acknowledged before teardown.
     assert(host.sendMatchEnd(1, &error));
     std::vector<uint8_t> ends;
     waitFor(host, client, [&]() {
@@ -237,14 +301,16 @@ int main()
         return !ends.empty();
     }, 3000);
     assert(ends.back() == 1);
+    waitFor(host, client, [&]() { return host.matchEndAcknowledged(); }, 3000);
 
     host.stop();
     client.stop();
 
-    // --- Disconnect & rejoin keeps slot state clean. ---
+    // Disconnect/rejoin keeps slot state clean; a second client is rejected while occupied.
     {
         LanSession hostSession;
         LanSession client1;
+        LanSession busyClient;
         LanSession client2;
         std::string err;
         assert(hostSession.host("Rejoin Room", "Host", 29877, &err));
@@ -254,6 +320,14 @@ int main()
             return hostSession.state() == SessionState::Lobby && client1.state() == SessionState::Lobby &&
                    hostSession.remoteConnected() && client1.remoteConnected();
         }, 4000);
+
+        assert(busyClient.join("127.0.0.1", 29877, "BusyClient", &err));
+        waitFor(hostSession, busyClient, [&]() {
+            return busyClient.state() == SessionState::Error;
+        }, 3000);
+        assert(hostSession.remoteConnected());
+        assert(hostSession.matchConfig().slots[1].playerName == "Client1");
+        busyClient.stop();
 
         assert(client1.setLocalHero("Sasuke"));
         waitFor(hostSession, client1, [&]() {
@@ -290,7 +364,10 @@ int main()
             return hostSession.state() == SessionState::Loading && client2.state() == SessionState::Loading;
         }, 3000);
 
+        // Reverse ordering on second match: host loads first.
         assert(hostSession.markLoaded(&err));
+        pump(hostSession, client2, 100);
+        assert(hostSession.state() == SessionState::Loading);
         assert(client2.markLoaded(&err));
         waitFor(hostSession, client2, [&]() {
             return hostSession.state() == SessionState::Battle && client2.state() == SessionState::Battle;

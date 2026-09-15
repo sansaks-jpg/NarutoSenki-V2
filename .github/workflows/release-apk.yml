@@ -6,6 +6,7 @@ on:
       - main
       - master
       - feature/lan-hotspot-multiplayer
+      - fix/lan-multiplayer-audit-hardening
     tags:
       - 'v*'
   workflow_dispatch:
@@ -25,7 +26,7 @@ permissions:
 
 jobs:
   build-release-apk:
-    name: Build release APK
+    name: Test LAN and build release APK
     runs-on: ubuntu-22.04
     timeout-minutes: 45
 
@@ -34,6 +35,49 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Build LAN protocol tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++20 -Wall -Wextra -Werror \
+            -Iprojects/NarutoSenki/Classes \
+            projects/NarutoSenki/Classes/Network/LanProtocol.cpp \
+            tests/lan_protocol_test.cpp \
+            -o /tmp/lan_protocol_test
+
+          g++ -std=c++20 -Wall -Wextra -Werror -pthread \
+            -Iprojects/NarutoSenki/Classes \
+            projects/NarutoSenki/Classes/Network/LanProtocol.cpp \
+            projects/NarutoSenki/Classes/Network/LanTransport.cpp \
+            projects/NarutoSenki/Classes/Network/LanDiscovery.cpp \
+            projects/NarutoSenki/Classes/Network/LanSession.cpp \
+            tests/lan_session_test.cpp \
+            -o /tmp/lan_session_test
+
+          g++ -std=c++20 -Wall -Wextra -Werror \
+            -Iprojects/NarutoSenki/Classes \
+            projects/NarutoSenki/Classes/Network/LanProtocol.cpp \
+            projects/NarutoSenki/Classes/Network/AuthoritativeBattleState.cpp \
+            tests/deterministic_battle_test.cpp \
+            -o /tmp/deterministic_battle_test
+
+      - name: Stress LAN tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            echo "LAN protocol iteration ${i}/20"
+            /tmp/lan_protocol_test
+          done
+          for i in $(seq 1 20); do
+            echo "LAN session iteration ${i}/20"
+            /tmp/lan_session_test
+          done
+          for i in $(seq 1 10); do
+            echo "Deterministic battle iteration ${i}/10"
+            /tmp/deterministic_battle_test
+          done
 
       - name: Set up Java 8
         uses: actions/setup-java@v4
@@ -71,8 +115,7 @@ jobs:
           echo "ANDROID_NDK_HOME=/usr/local/android-ndk-r17c" >> "$GITHUB_ENV"
           echo "NDK_ROOT=/usr/local/android-ndk-r17c" >> "$GITHUB_ENV"
           echo "ANDROID_NDK=/usr/local/android-ndk-r17c" >> "$GITHUB_ENV"
-          
-          # Tulis local.properties agar Gradle mengenali lokasi SDK dan NDK
+
           cat <<EOF > projects/NarutoSenki/proj.android-studio/local.properties
           sdk.dir=${ANDROID_SDK_ROOT:-$ANDROID_HOME}
           ndk.dir=/usr/local/android-ndk-r17c
@@ -82,7 +125,6 @@ jobs:
         working-directory: projects/NarutoSenki/proj.android-studio
         run: |
           chmod +x ./gradlew
-          # Pastikan compiler Clang digunakan karena Application.mk menggunakan C++20 (-std=c++2a)
           sed -i 's/NDK_TOOLCHAIN_VERSION=4.9/NDK_TOOLCHAIN_VERSION=clang/g' app/build.gradle
           ./gradlew --no-daemon --stacktrace assembleRelease
 

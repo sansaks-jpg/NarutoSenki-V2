@@ -2,6 +2,7 @@
 #include "CCLuaEngine.h"
 #include "script_support/CCScriptSupport.h"
 
+#include "Network/LanNetworkRuntime.hpp"
 #include "Systems/Initializer.hpp"
 
 #if (CC_TARGET_PLATFORM == CC_PLATFORM_MAC)
@@ -40,13 +41,9 @@ bool AppDelegate::applicationDidFinishLaunching()
 					std::string root(buf);
 					if (!root.empty() && root.back() != '/')
 						root.push_back('/');
-					// Lua scripts are bundled under Contents/Resources/lua/.
 					pEngine->addSearchPath((root + "lua").c_str());
 					FileUtils::sharedFileUtils()->addSearchPath(root.c_str());
 					FileUtils::sharedFileUtils()->addSearchPath((root + "lua").c_str());
-					// Game assets are bundled as a folder reference under
-					// Contents/Resources/Resources/, so make that visible to
-					// the cocos2d-x file resolver as well.
 					FileUtils::sharedFileUtils()->addSearchPath((root + "Resources").c_str());
 				}
 				CFRelease(url);
@@ -58,7 +55,6 @@ bool AppDelegate::applicationDidFinishLaunching()
 	pEngine->addSearchPath("../lua");
 	FileUtils::sharedFileUtils()->addSearchPath("../lua");
 #elif (CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID)
-	// pStack->setXXTEAKeyAndSign("2dxLua", strlen("2dxLua"), "XXTEA", strlen("XXTEA"));
 	pEngine->addSearchPath("lua");
 	FileUtils::sharedFileUtils()->addSearchPath("lua");
 	CCLOG("------ Android writable path -> %s", FileUtils::sharedFileUtils()->getWritablePath().c_str());
@@ -75,8 +71,6 @@ bool AppDelegate::applicationDidFinishLaunching()
 
 	auto cwd = FileUtils::sharedFileUtils()->getWritablePath();
 	string end = "Debug.win32\\";
-	// If found use visual studio debug
-	// otherwise use visual studio code
 	if (cwd.find(end) != string::npos)
 	{
 		cwd = cwd.substr(0, cwd.length() - end.length());
@@ -93,16 +87,13 @@ bool AppDelegate::applicationDidFinishLaunching()
 	}
 	CCLOG("Current work path: %s", cwd.c_str());
 	CCLOG("---------------------------\n");
-
 #endif
 
 	auto eglView = GLView::sharedOpenGLView();
 
 #if (CC_TARGET_PLATFORM == CC_PLATFORM_LINUX) || (CC_TARGET_PLATFORM == CC_PLATFORM_WIN32) || (CC_TARGET_PLATFORM == CC_PLATFORM_MAC)
-	// get window settings
 	pEngine->executeScriptFile(FileUtils::sharedFileUtils()->fullPathForFilename("window.lua").c_str());
 
-	// 2. initialize window
 	bool isFullscreen = false;
 	int width = 1280;
 	int height = 720;
@@ -134,39 +125,24 @@ bool AppDelegate::applicationDidFinishLaunching()
 	}
 	else
 	{
-		// Set the frame size to the full screen value
 		eglView->setFrameSize(eglView->getFullscreenWidth(), eglView->getFullscreenHeight());
 		eglView->enterFullscreen(0, 0);
 	}
 #elif (CC_TARGET_PLATFORM == CC_PLATFORM_LINUX)
-	//TODO: Support Fullscreen
 	eglView->setFrameSize(width, height);
 	eglView->setTitle(title);
 	eglView->setIcon("icon.png");
 #elif (CC_TARGET_PLATFORM == CC_PLATFORM_MAC)
-	// On macOS the NSWindow/NSOpenGLView size is created by AppController.
-	// Forcing a different logical frame size here (e.g. from window.lua)
-	// desynchronizes touch/mouse coordinates from rendered UI.
-	// Keep the current view size and only apply the window title.
 	eglView->setViewName(title);
 #endif
 #endif
 
-	// initialize director
 	Director *pDirector = Director::sharedDirector();
-
 	pDirector->setOpenGLView(eglView);
-	// eglView->setDesignResolutionSize(480, 320, kResolutionFixedHeight);
-
-	// turn on display FPS
 	pDirector->setDisplayStats(false);
-
-	// set FPS. the default value is 1.0/60 if you don't call this
-	// pDirector->setAnimationInterval(1.0 / 60);
 
 	Internal::initAllSystems();
 
-	// 3. execute main lua script
 	string path = FileUtils::sharedFileUtils()->fullPathForFilename("main.lua");
 	pEngine->executeScriptFile(path.c_str());
 
@@ -175,14 +151,20 @@ bool AppDelegate::applicationDidFinishLaunching()
 
 void AppDelegate::applicationDidEnterBackground()
 {
-	Director::sharedDirector()->stopAnimation();
+	// Cocos stops main-thread polling while backgrounded. Resolve an active LAN
+	// session synchronously before stopping animation so sockets and match state
+	// cannot become a half-alive ghost session. During Battle this is a local
+	// forfeit; during lobby/loading the session is simply closed.
+	auto &lanSession = nsv2::network::sharedLanSession();
+	if (lanSession.networkActive() || lanSession.state() == nsv2::network::SessionState::Battle)
+		lanSession.handleAppBackground();
 
+	Director::sharedDirector()->stopAnimation();
 	SimpleAudioEngine::sharedEngine()->pauseBackgroundMusic();
 }
 
 void AppDelegate::applicationWillEnterForeground()
 {
 	Director::sharedDirector()->startAnimation();
-
 	SimpleAudioEngine::sharedEngine()->resumeBackgroundMusic();
 }

@@ -73,6 +73,41 @@ public:
     void poll();
     void stop();
 
+    // Cocos stops main-thread polling while Android is backgrounded. Treat a
+    // mid-battle background as a local forfeit: notify the peer, stop sockets,
+    // and queue the opponent as winner so GameLayer resolves a loss on resume.
+    // Outside Battle a plain stop is enough (LoadLayer already treats Idle as abort).
+    void handleAppBackground()
+    {
+        if (_role == SessionRole::None)
+            return;
+        if (_state != SessionState::Battle)
+        {
+            stop();
+            return;
+        }
+        if (!_matchEnds.empty())
+            return;
+
+        const uint8_t opponentSlot = _localSlot == 0 ? 1 : 0;
+        if (_config.slots.size() > opponentSlot)
+            _matchEnds.push_back(static_cast<uint8_t>(_config.slots[opponentSlot].group));
+
+        if (_remoteConnected && !_remoteAddress.empty() && _remotePort != 0)
+        {
+            Message leave;
+            leave.type = MessageType::Leave;
+            leave.sequence = _nextSequence++;
+            std::string ignored;
+            sendToRemote(leave, &ignored);
+        }
+        _transport.stop();
+        _discovery.stop();
+        _remoteConnected = false;
+        _pendingReliable.clear();
+        _notices.push_back({_state, "LAN battle dihentikan karena aplikasi masuk background."});
+    }
+
     bool startScan(std::string *error = nullptr);
     void stopScan();
     void getRooms(std::vector<RoomAdvertisement> &rooms);

@@ -21,7 +21,7 @@ void AuthoritativeBattleState::initializeMatch(const MatchConfig &config)
 {
     _config = config;
     _currentTick = 0;
-    _sessionEpoch = config.seed ^ config.matchId;
+    _sessionEpoch = computeSessionEpoch(config.matchId, config.seed);
     _prng.setSeed(config.seed ? config.seed : 0x12345678u);
     _nextEventId = 1;
     _nextProjectileId = 1;
@@ -38,13 +38,12 @@ void AuthoritativeBattleState::initializeMatch(const MatchConfig &config)
         _heroes[i].maxHp = 10000;
         _heroes[i].ckr = 0;
         _heroes[i].maxCkr = 3000;
-        _heroes[i].state = 0; // IDLE
+        _heroes[i].state = 0;
         _heroes[i].deadCount = 0;
         _heroes[i].killCount = 0;
         _heroes[i].lastAppliedSequence = 0;
         _heroes[i].lastInputTick = 0;
 
-        // Position 1P on the left, 2P on the right (fixed point x100)
         if (i == 0)
         {
             _heroes[i].x = 28000;
@@ -75,7 +74,6 @@ void AuthoritativeBattleState::resolveMovement(uint8_t slot, const InputCommand 
         return;
     auto &hero = _heroes[slot];
 
-    // Clamped direction axis
     float ax = std::clamp(cmd.axisX / 1000.0f, -1.0f, 1.0f);
     float ay = std::clamp(cmd.axisY / 1000.0f, -1.0f, 1.0f);
 
@@ -86,24 +84,22 @@ void AuthoritativeBattleState::resolveMovement(uint8_t slot, const InputCommand 
         hero.x += hero.vx;
         hero.y += hero.vy;
         hero.flipped = ax < 0;
-        hero.state = 1; // WALK
+        hero.state = 1;
     }
     else
     {
         hero.vx = 0;
         hero.vy = 0;
-        if (hero.state == 1) // If was WALK, transition to IDLE
+        if (hero.state == 1)
             hero.state = 0;
     }
 
-    // Boundary check
     hero.x = std::clamp(hero.x, kMapMinX, kMapMaxX);
     hero.y = std::clamp(hero.y, kMapMinY, kMapMaxY);
 }
 
 bool AuthoritativeBattleState::checkSweptCollision(int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t targetX, int32_t targetY, int32_t radius)
 {
-    // Distance from target point to segment (x1, y1) -> (x2, y2)
     double px = x2 - x1;
     double py = y2 - y1;
     double lenSq = px * px + py * py;
@@ -142,7 +138,6 @@ void AuthoritativeBattleState::resolveProjectiles()
             continue;
         }
 
-        // Test collision against opponent heroes
         for (auto &hero : _heroes)
         {
             if (hero.slot == p.ownerSlot || hero.hp == 0)
@@ -157,7 +152,6 @@ void AuthoritativeBattleState::resolveProjectiles()
         }
     }
 
-    // Clean up inactive projectiles
     _projectiles.erase(std::remove_if(_projectiles.begin(), _projectiles.end(), [](const SimProjectile &p) {
         return !p.active;
     }), _projectiles.end());
@@ -194,7 +188,6 @@ void AuthoritativeBattleState::applyDamage(uint8_t sourceSlot, uint8_t targetSlo
     uint32_t actualDmg = static_cast<uint32_t>(std::min(static_cast<int32_t>(target.hp), damage));
     target.hp -= actualDmg;
 
-    // Generate Hit Impact event
     CombatEvent hitEv;
     hitEv.eventId = _nextEventId++;
     hitEv.tick = _currentTick;
@@ -243,17 +236,13 @@ void AuthoritativeBattleState::stepSimulation(uint32_t tick)
 {
     _currentTick = tick;
 
-    // Process inputs
     for (size_t i = 0; i < _heroes.size(); ++i)
     {
         auto it = _latestInputs.find(static_cast<uint8_t>(i));
         if (it != _latestInputs.end())
-        {
             resolveMovement(static_cast<uint8_t>(i), it->second);
-        }
     }
 
-    // Step projectiles
     resolveProjectiles();
 }
 
@@ -281,7 +270,6 @@ StateSnapshot AuthoritativeBattleState::buildSnapshot(uint32_t tick, uint16_t el
     }
     snapshot.clientSequenceWatermark = maxSeq;
 
-    // Drain events into snapshot
     while (!_pendingCombatEvents.empty())
     {
         snapshot.combatEvents.push_back(_pendingCombatEvents.front());

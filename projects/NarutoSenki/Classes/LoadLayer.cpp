@@ -1,6 +1,7 @@
 #include "LoadLayer.h"
 #include "GameMode/GameModeImpl.h"
 #include "Network/LanNetworkRuntime.hpp"
+#include "StartMenu.h"
 
 LoadLayer::LoadLayer()
 {
@@ -20,7 +21,6 @@ bool LoadLayer::init()
 	addSprites("UI.plist");
 	addSprites("Menu.plist");
 
-	// produce the menu_bar
 	Sprite *menu_bar_b = Sprite::create("menu_bar2.png");
 	if (menu_bar_b)
 	{
@@ -46,7 +46,6 @@ bool LoadLayer::init()
 		addChild(loading_title, 3);
 	}
 
-	// produce the cloud
 	Sprite *cloud_left = Sprite::createWithSpriteFrameName("cloud.png");
 	if (cloud_left)
 	{
@@ -98,15 +97,15 @@ void LoadLayer::preloadIMG()
 
 	auto herosDataVector = getGameModeHandler()->getHerosArray();
 	int count = herosDataVector.size();
-	if (count == 2) // 1v1
+	if (count == 2)
 		count = 0;
-	else if (count == 4) // Boss mode (3v1)
+	else if (count == 4)
 		count = 3;
-	else if (count == 5) // Boss mode (4v1)
+	else if (count == 5)
 		count = 4;
-	else if (count == 6) // 3v3
+	else if (count == 6)
 		count = 3;
-	else if (count == 8) // 4v4
+	else if (count == 8)
 		count = 4;
 
 	int i = 0;
@@ -133,10 +132,8 @@ void LoadLayer::preloadIMG()
 	}
 	addSprites(kFlog_Kotetsu);
 	addSprites(kFlog_FemalePain);
-
 	addSprites(kFlog_Izumo);
 	addSprites(kFlog_Kakashi);
-
 	addSprites(kFlog_Pain);
 	addSprites(kFlog_Obito);
 
@@ -167,14 +164,11 @@ void LoadLayer::perloadCharIMG(const string &name)
 	auto path = format("Unit/Ninja/{}/{}_Skill.plist", name, name);
 	if (FileUtils::sharedFileUtils()->isFileExist(path.c_str()))
 		addSprites(path);
-	// else
-	// CCLOG("Not found file %s", path);
 
 	KTools::prepareFileOGG(name);
 
 	path = format("Unit/Ninja/{}/{}.plist", name, name);
 	addSprites(path);
-	// Add extra sprites
 	if (name == HeroEnum::Jiraiya)
 	{
 		addSprites(mk_ninja_plist("SageJiraiya"));
@@ -225,8 +219,6 @@ void LoadLayer::perloadCharIMG(const string &name)
 		addSprites(mk_ninja_plist("AnimalPath"));
 		addSprites(mk_ninja_plist("AsuraPath"));
 		addSprites(mk_ninja_plist("NarakaPath"));
-		// addSprites(mk_ninja_plist("HumanPath"));
-		// addSprites(mk_ninja_plist("PertaPath"));
 		addSprites(mk_ninja_plist("Nagato"));
 		KTools::prepareFileOGG(HeroEnum::Nagato);
 	}
@@ -244,18 +236,14 @@ void LoadLayer::perloadCharIMG(const string &name)
 void LoadLayer::unloadCharIMG(CharacterBase *c)
 {
 	if (c == nullptr || c->isClone() || c->isSummon())
-	{
 		return;
-	}
 
 	auto name = c->getName();
 	auto path = format("Unit/Ninja/{}/{}.plist", name, name);
 	removeSprites(path);
 
 	if (c->isPlayerOrCom())
-	{
 		KTools::prepareFileOGG(name, true);
-	}
 
 	if (name == HeroEnum::Jiraiya)
 	{
@@ -300,8 +288,6 @@ void LoadLayer::unloadCharIMG(CharacterBase *c)
 		removeSprites(mk_ninja_plist("AnimalPath"));
 		removeSprites(mk_ninja_plist("AsuraPath"));
 		removeSprites(mk_ninja_plist("NarakaPath"));
-		// addSprites(mk_ninja_plist("HumanPath"));
-		// addSprites(mk_ninja_plist("PertaPath"));
 		removeSprites(mk_ninja_plist("Nagato"));
 	}
 	else if (name == HeroEnum::Nagato)
@@ -333,7 +319,6 @@ void LoadLayer::setLoadingAnimation(const char *player, int index)
 	loadingAvator->setPosition(Vec2(winSize.width - 100 + index * 16, 30));
 	loadingAvator->setAnchorPoint(Vec2(0, 0));
 
-	// FIXME: Use the other way get animation frame count
 	ssize_t frameCount = is_same(player, HeroEnum::Konan) ? 1 : 7;
 	Vector<SpriteFrame *> animeFrames(frameCount);
 	for (int i = 1; i < frameCount; i++)
@@ -352,6 +337,7 @@ void LoadLayer::setLoadingAnimation(const char *player, int index)
 
 void LoadLayer::playBGM(float dt)
 {
+	(void)dt;
 	SimpleAudioEngine::sharedEngine()->playBackgroundMusic(LOADING_MUSIC, false);
 }
 
@@ -359,7 +345,6 @@ void LoadLayer::preloadAudio()
 {
 	auto bg_src = _enableGear ? "blue_bg.png" : "red_bg.png";
 	Sprite *bgSprite = Sprite::create(bg_src);
-
 	FULL_SCREEN_SPRITE(bgSprite);
 	bgSprite->setAnchorPoint(Vec2(0, 0));
 	bgSprite->setPosition(Vec2(0, 0));
@@ -368,19 +353,14 @@ void LoadLayer::preloadAudio()
 	preloadIMG();
 }
 
-void LoadLayer::onLoadFinish(float dt)
+void LoadLayer::enterGameScene()
 {
-	(void)dt;
-	if (_networkBattle)
-	{
-		std::string err;
-		nsv2::network::sharedLanSession().markLoaded(&err);
-	}
+	if (_networkSceneEntered)
+		return;
+	_networkSceneEntered = true;
 
 	Scene *gameScene = Scene::create();
-
 	_hudLayer = HudLayer::create();
-
 	_gameLayer = GameLayer::create();
 	if (_networkBattle)
 		_gameLayer->enableNetworkBattle(_networkLocalSlot);
@@ -398,15 +378,64 @@ void LoadLayer::onLoadFinish(float dt)
 	gameScene->addChild(_bgLayer, kBgOrder);
 	gameScene->addChild(_gameLayer, kGameLayerOrder);
 	gameScene->addChild(_hudLayer, kHudLayerOrder);
-
 	Director::sharedDirector()->replaceScene(TransitionFade::create(0.5f, gameScene));
+}
+
+void LoadLayer::abortNetworkLoading()
+{
+	if (_networkSceneEntered)
+		return;
+	_networkSceneEntered = true;
+	nsv2::network::sharedLanSession().stop();
+	Scene *startScene = Scene::create();
+	startScene->addChild(StartMenu::create());
+	Director::sharedDirector()->replaceScene(TransitionFade::create(0.5f, startScene));
+}
+
+void LoadLayer::onLoadFinish(float dt)
+{
+	(void)dt;
+	if (!_networkBattle)
+	{
+		enterGameScene();
+		return;
+	}
+
+	if (_networkLocalLoadComplete)
+		return;
+
+	std::string error;
+	if (!nsv2::network::sharedLanSession().markLoaded(&error))
+	{
+		abortNetworkLoading();
+		return;
+	}
+	_networkLocalLoadComplete = true;
+
+	if (nsv2::network::sharedLanSession().state() == nsv2::network::SessionState::Battle)
+		enterGameScene();
 }
 
 void LoadLayer::update(float dt)
 {
 	(void)dt;
-	if (_networkBattle)
+	if (!_networkBattle || _networkSceneEntered)
+		return;
+
+	auto &session = nsv2::network::sharedLanSession();
+	session.poll();
+
+	if (session.state() == nsv2::network::SessionState::Finished ||
+		session.state() == nsv2::network::SessionState::Error ||
+		session.state() == nsv2::network::SessionState::Idle)
 	{
-		nsv2::network::sharedLanSession().poll();
+		abortNetworkLoading();
+		return;
 	}
+
+	// Both peers remain on LoadLayer until the reliable Loaded/BattleReady
+	// handshake is complete. This prevents one device entering GameLayer while
+	// the other is still in Loading after packet loss/reordering.
+	if (_networkLocalLoadComplete && session.state() == nsv2::network::SessionState::Battle)
+		enterGameScene();
 }

@@ -766,6 +766,16 @@ void LanSession::handleHello(const TransportEvent &event)
         return;
     }
 
+    // A new peer starts a new sender sequence space. Never compare its packet
+    // numbers with the previous client's watermarks after a leave/rejoin.
+    clearBattleQueues();
+    _lastRemoteHeroSequence = 0;
+    _lastRemoteReadySequence = 0;
+    _lastMatchStartSequence = 0;
+    _battleReadySequence = 0;
+    _matchEndSequence = 0;
+    _matchEndAcknowledged = false;
+
     _remoteAddress = event.address;
     _remotePort = event.port;
     _remotePlayerName = name;
@@ -1057,6 +1067,13 @@ void LanSession::handleMessage(const TransportEvent &event)
             {
                 if (_config.slots.size() >= 2)
                     _config.slots[1] = {1, GroupId::Akatsuki, false, true, "", ""};
+                clearBattleQueues();
+                _lastRemoteHeroSequence = 0;
+                _lastRemoteReadySequence = 0;
+                _lastMatchStartSequence = 0;
+                _battleReadySequence = 0;
+                _matchEndSequence = 0;
+                _matchEndAcknowledged = false;
                 updateDiscoveryCapacity(1);
                 setState(SessionState::Hosting, "Pemain keluar dari room.");
             }
@@ -1179,6 +1196,13 @@ void LanSession::poll()
             {
                 if (_config.slots.size() >= 2)
                     _config.slots[1] = {1, GroupId::Akatsuki, false, true, "", ""};
+                clearBattleQueues();
+                _lastRemoteHeroSequence = 0;
+                _lastRemoteReadySequence = 0;
+                _lastMatchStartSequence = 0;
+                _battleReadySequence = 0;
+                _matchEndSequence = 0;
+                _matchEndAcknowledged = false;
                 updateDiscoveryCapacity(1);
                 setState(SessionState::Hosting, "Client terputus dari lobby.");
             }

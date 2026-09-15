@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <thread>
 
 namespace nsv2::network
 {
@@ -18,6 +19,7 @@ constexpr uint64_t kHandshakeTimeoutMs = 8000;
 constexpr uint64_t kPeerTimeoutMs = 10000;
 constexpr uint64_t kBattlePeerTimeoutMs = 6000;
 constexpr uint64_t kLoadingDeadlineMs = 60000;
+constexpr uint64_t kFinalVerdictFlushMs = 500;
 
 void putU16(std::vector<uint8_t> &out, uint16_t value)
 {
@@ -120,13 +122,11 @@ void LanSession::initializeConfig()
 {
     _config = {};
     _config.matchId = makeMatchId();
-    _config.mode = 0; // GameMode::OneVsOne
+    _config.mode = 0;
     _config.mapId = 1;
     _config.seed = (_config.matchId * 1664525u) + 1013904223u;
     _config.tickRate = 30;
     _config.maxPlayers = 2;
-    // Gear mutates combat stats locally and has no network command/state yet.
-    // Keep it disabled in LAN until purchases/equips are host-authoritative.
     _config.enableGear = false;
     _config.enableReborn = true;
     _config.slots = {
@@ -225,7 +225,7 @@ bool LanSession::sendToRemote(const Message &message, std::string *error)
         return false;
     }
     Message stamped = message;
-    stamped.ack = 0; // v4 uses exact Ack payloads, not cumulative header acks.
+    stamped.ack = 0;
     return _transport.send(stamped, _remoteAddress, _remotePort, error);
 }
 
@@ -427,7 +427,6 @@ bool LanSession::startMatch(std::string *error)
         !sendReliable(std::move(start), true, true, error))
         return false;
 
-    // Once loading starts, do not advertise a room that can no longer accept a player.
     _discovery.stop();
     setState(SessionState::Loading, "Match dimulai. Memuat resource...");
     return true;
@@ -577,7 +576,9 @@ bool LanSession::submitInput(const InputCommand &command, std::string *error)
         }
     }
 
-    _inputCommands.push_back(normalized);
+    // Local gameplay already executes immediately in GameLayer for prediction
+    // and responsiveness. Only remote commands belong in this receive queue;
+    // queueing local attacks here caused them to be applied a second time.
     return true;
 }
 
@@ -602,6 +603,7 @@ bool LanSession::sendSnapshot(const StateSnapshot &snapshot, std::string *error)
 
     StateSnapshot normalized = snapshot;
     normalized.sessionEpoch = computeSessionEpoch(_config.matchId, _config.seed);
+    normalized.clientSequenceWatermark = _lastRemoteInputSequence;
     normalized.stateChecksum = computeStateChecksum(normalized);
 
     Message message;
@@ -721,8 +723,6 @@ void LanSession::handleHello(const TransportEvent &event)
         if (event.address == _remoteAddress && event.port == _remotePort)
         {
             _lastReceiveMs = nowMs();
-            // Client may still be Connecting because JoinAccept was lost. Re-send
-            // the pending accept immediately instead of ignoring its Hello retry.
             auto it = std::find_if(_pendingReliable.begin(), _pendingReliable.end(), [](const PendingReliable &p) {
                 return p.message.type == MessageType::JoinAccept;
             });
@@ -896,8 +896,6 @@ void LanSession::handleMessage(const TransportEvent &event)
         std::string hero;
         if (readString(message.payload, hero, kMaxHeroName) && updateRemoteHero(hero))
             setState(SessionState::Lobby, "Pilihan hero client diterima.");
-        // Whether accepted or rejected (e.g. duplicate hero), send authoritative
-        // lobby state so the client's optimistic selection is corrected.
         sendLobbyUpdate();
         return;
     }
@@ -961,6 +959,7 @@ void LanSession::handleMessage(const TransportEvent &event)
         std::string error;
         const uint8_t expectedSlot = (_role == SessionRole::Host) ? 1 : 0;
         if (!decodeInputCommand(message.payload, command, &error) ||
+            message.sequence != command.sequence ||
             command.playerSlot != expectedSlot || !validateInput(command, &error))
             return;
 
@@ -998,7 +997,6 @@ void LanSession::handleMessage(const TransportEvent &event)
             return;
 
         _lastClientStateTick = state.tick;
-        // Newer position supersedes older client reports; do not accumulate lag.
         _clientStates.clear();
         _clientStates.push_back(std::move(state));
         return;
@@ -1027,7 +1025,6 @@ void LanSession::handleMessage(const TransportEvent &event)
             return;
 
         _lastSnapshotTick = snapshot.tick;
-        // Rendering only needs the newest authoritative snapshot.
         _snapshots.clear();
         _snapshots.push_back(std::move(snapshot));
         return;
@@ -1068,8 +1065,6 @@ void LanSession::handleTransportEvents(const std::vector<TransportEvent> &events
     {
         if (event.type == TransportEventType::Message)
             handleMessage(event);
-        // Malformed/foreign UDP datagrams remain non-fatal. Socket-level liveness
-        // is handled by heartbeat/state timeouts rather than packet decode noise.
     }
 }
 
@@ -1270,6 +1265,32 @@ void LanSession::clearBattleQueues()
 
 void LanSession::stop()
 {
+    // GameLayer may call stop() immediately after sending MatchEnd. Give the
+    // final reliable verdict a short bounded flush window before closing UDP,
+    // otherwise the retransmission queue would be destroyed by cleanup.
+    if (_role == SessionRole::Host && _remoteConnected &&
+        _matchEndSequence != 0 && !_matchEndAcknowledged)
+    {
+        const uint64_t deadline = nowMs() + kFinalVerdictFlushMs;
+        while (!_matchEndAcknowledged && nowMs() < deadline)
+        {
+            auto pending = std::find_if(_pendingReliable.begin(), _pendingReliable.end(),
+                                        [&](const PendingReliable &entry) {
+                                            return entry.message.sequence == _matchEndSequence;
+                                        });
+            if (pending != _pendingReliable.end())
+            {
+                std::string ignored;
+                sendToRemote(pending->message, &ignored);
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(15));
+            std::vector<TransportEvent> events;
+            _transport.poll(events);
+            handleTransportEvents(events);
+        }
+    }
+
     if (_role != SessionRole::None && _remoteConnected &&
         !_remoteAddress.empty() && _remotePort != 0)
     {

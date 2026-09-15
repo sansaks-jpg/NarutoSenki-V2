@@ -131,8 +131,6 @@ struct CharacterSnapshot
     bool flipped = false;
 };
 
-// Non-hero battlefield entities mirrored from the host simulation.
-// unitId namespaces: towers = 100 + charId, guardian = 200, flogs = 300+.
 enum class NetUnitKind : uint8_t
 {
     FlogKonoha = 1,
@@ -143,11 +141,8 @@ enum class NetUnitKind : uint8_t
 
 struct UnitSnapshot
 {
-    // uint16 namespaces: towers = charId (1..), guardian = 200, flogs = 300+.
     uint16_t unitId = 0;
     NetUnitKind kind = NetUnitKind::Tower;
-    // Flogs: index into the shared flog-name table. Guardian:
-    // bit0 = name (0 Roshi / 1 Han), bit1 = group (0 Konoha / 1 Akatsuki).
     uint8_t variant = 0;
     int32_t x = 0;
     int32_t y = 0;
@@ -172,7 +167,6 @@ struct StateSnapshot
 {
     uint32_t matchId = 0;
     uint32_t tick = 0;
-    // Match clock in seconds as tracked by the snapshot sender (host).
     uint16_t elapsedSeconds = 0;
     uint32_t sessionEpoch = 0;
     uint32_t clientSequenceWatermark = 0;
@@ -184,7 +178,6 @@ struct StateSnapshot
 
 struct RoomAdvertisement
 {
-    // Filled by discovery from the UDP source address; not serialized in the payload.
     std::string address;
     std::string roomId;
     std::string roomName;
@@ -196,7 +189,21 @@ struct RoomAdvertisement
     uint32_t mapId = 1;
 };
 
-// Computes a deterministic FNV-1a checksum over crucial simulation state.
+// A stable per-match generation id. Do not derive this as seed ^ matchId:
+// MatchConfig currently derives seed from matchId, which made that expression
+// constant and allowed stale packets from previous matches to look current.
+inline uint32_t computeSessionEpoch(uint32_t matchId, uint32_t seed)
+{
+    uint32_t x = matchId + 0x9E3779B9u;
+    x ^= seed + 0x85EBCA6Bu + (x << 6) + (x >> 2);
+    x ^= x >> 16;
+    x *= 0x7FEB352Du;
+    x ^= x >> 15;
+    x *= 0x846CA68Bu;
+    x ^= x >> 16;
+    return x == 0 ? 1u : x;
+}
+
 uint32_t computeStateChecksum(const StateSnapshot &snapshot);
 
 bool encodeMessage(const Message &message, std::vector<uint8_t> &out, std::string *error = nullptr);

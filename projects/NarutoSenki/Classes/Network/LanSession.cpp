@@ -129,8 +129,10 @@ void LanSession::initializeConfig()
     _config.maxPlayers = 2;
     _config.enableGear = false;
     _config.enableReborn = true;
+    // Hero selection is explicit. Empty defaults prevent a player becoming
+    // Ready with a hero they never confirmed in the LAN selection screen.
     _config.slots = {
-        {0, GroupId::Konoha, false, false, _localPlayerName, "Naruto"},
+        {0, GroupId::Konoha, false, false, _localPlayerName, ""},
         {1, GroupId::Akatsuki, false, true, "", ""},
     };
 }
@@ -576,9 +578,6 @@ bool LanSession::submitInput(const InputCommand &command, std::string *error)
         }
     }
 
-    // Local gameplay already executes immediately in GameLayer for prediction
-    // and responsiveness. Only remote commands belong in this receive queue;
-    // queueing local attacks here caused them to be applied a second time.
     return true;
 }
 
@@ -891,11 +890,22 @@ void LanSession::handleMessage(const TransportEvent &event)
         sendDeliveryAck(message.sequence);
         if (!tryAcceptRemoteSequence(message.sequence) || message.sequence <= _lastRemoteHeroSequence)
             return;
+
+        // SelectHero and Ready are separate UDP messages. Preserve a Ready
+        // action that was sent later (higher sender sequence) but happened to
+        // arrive first; conversely, a genuinely newer hero selection still
+        // clears ready as intended.
+        const bool preserveLaterReady = _lastRemoteReadySequence > message.sequence;
+        const bool laterReadyValue = _config.slots.size() >= 2 ? _config.slots[1].ready : false;
         _lastRemoteHeroSequence = message.sequence;
 
         std::string hero;
         if (readString(message.payload, hero, kMaxHeroName) && updateRemoteHero(hero))
+        {
+            if (preserveLaterReady && _config.slots.size() >= 2)
+                _config.slots[1].ready = laterReadyValue;
             setState(SessionState::Lobby, "Pilihan hero client diterima.");
+        }
         sendLobbyUpdate();
         return;
     }
@@ -909,7 +919,11 @@ void LanSession::handleMessage(const TransportEvent &event)
         _lastRemoteReadySequence = message.sequence;
         if (message.payload.size() != 1 || message.payload[0] > 1 || _config.slots.size() < 2)
             return;
-        _config.slots[1].ready = message.payload[0] != 0;
+
+        // A Ready packet that predates the latest hero selection is obsolete:
+        // selecting a new hero invalidates readiness even if UDP reorders them.
+        if (message.sequence > _lastRemoteHeroSequence)
+            _config.slots[1].ready = message.payload[0] != 0;
         sendLobbyUpdate();
         return;
     }
@@ -1265,9 +1279,6 @@ void LanSession::clearBattleQueues()
 
 void LanSession::stop()
 {
-    // GameLayer may call stop() immediately after sending MatchEnd. Give the
-    // final reliable verdict a short bounded flush window before closing UDP,
-    // otherwise the retransmission queue would be destroyed by cleanup.
     if (_role == SessionRole::Host && _remoteConnected &&
         _matchEndSequence != 0 && !_matchEndAcknowledged)
     {
